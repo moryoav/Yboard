@@ -943,7 +943,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         if (langs.size < 2) return
         val i = langs.indexOf(settings.activeLanguage)
         val next = langs[(i + 1) % langs.size]
-        if (mode == Mode.SYMBOLS2) mode = Mode.SYMBOLS
+        mode = Mode.LETTERS
         Prefs.update { it.copy(language = next) }
         if (next != "en") setShift(ShiftState.OFF) else updateAutoShift()
         if (emojiSearchBar != null) refreshEmojiSearch()

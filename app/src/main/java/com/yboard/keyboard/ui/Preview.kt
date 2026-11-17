@@ -61,6 +61,7 @@ private class PreviewController(private val root: KeyboardRootView) : KeyboardVi
                 val langs = s.enabledLanguages
                 val cur = language?.takeIf { it in langs } ?: s.activeLanguage
                 language = langs[(langs.indexOf(cur) + 1) % langs.size]
+                mode = Mode.LETTERS
             }
             KeyType.CHAR -> if (shift == ShiftState.ON) shift = ShiftState.OFF
             else -> Unit

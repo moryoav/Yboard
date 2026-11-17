@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.2
+
+- Fixed language switching to immediately show the new language's letters from either symbols page, including in the settings preview.
+
 ## 1.7.1
 
 - Matched the sticker toolbar button to the emoji button with a centered icon, no text label and no permanent circle.
