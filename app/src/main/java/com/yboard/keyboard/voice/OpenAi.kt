@@ -5,6 +5,8 @@ import android.util.Log
 import com.yboard.keyboard.settings.AiFeature
 import com.yboard.keyboard.settings.AiModel
 import com.yboard.keyboard.settings.Prefs
+import com.yboard.keyboard.usage.TokenUsage
+import com.yboard.keyboard.usage.UsageStore
 import okhttp3.Call
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
@@ -145,8 +147,9 @@ object OpenAi {
      */
     fun liveSessionJson(
         languages: List<String>, level: Int, vocabulary: List<String> = emptyList(), pairs: List<Pair<String, String>> = emptyList(),
+        model: String = LIVE_MODEL,
     ): String {
-        val transcription = JSONObject().put("model", LIVE_MODEL)
+        val transcription = JSONObject().put("model", model)
         if (level <= 2) transcription.put("languages", JSONArray(languages))
         if (level <= 1) transcription.put("prompt", speechPrompt(vocabulary, pairs))
         if (level == 0) {
@@ -172,6 +175,7 @@ object OpenAi {
         /** "he" / "en": the speaker is speaking only this language (asking again after a wrong-language answer). */
         onlyLanguage: String? = null,
     ): String {
+        val model = FILE_MODEL
         val only = when (onlyLanguage) {
             "he" -> "The speaker is speaking Hebrew. Write Hebrew. "
             "en" -> "The speaker is speaking English. Write English. "
@@ -179,7 +183,7 @@ object OpenAi {
         }
         val body = MultipartBody.Builder().setType(MultipartBody.FORM)
             .addFormDataPart("file", "speech.wav", wav.toRequestBody("audio/wav".toMediaType()))
-            .addFormDataPart("model", FILE_MODEL)
+            .addFormDataPart("model", model)
             .addFormDataPart("response_format", "json")
             .addFormDataPart("prompt", (only + speechPrompt(vocabulary, pairs) + " " + context.takeLast(200)).trim())
         languages.forEach { body.addFormDataPart("languages[]", it) }
@@ -198,7 +202,10 @@ object OpenAi {
                 throw ApiError(r.code, msg)
             }
             Log.i(TAG, "transcribe -> OK in ${ms}ms")
-            return JSONObject(text ?: "{}").optString("text").trim()
+            val result = JSONObject(text ?: "{}")
+            val seconds = (wav.size - 44).coerceAtLeast(0) / (SAMPLE_RATE * 2.0)
+            UsageStore.record(AiFeature.FILE, model, TokenUsage.parse(result.optJSONObject("usage"), seconds))
+            return result.optString("text").trim()
         }
     }
 
@@ -467,7 +474,7 @@ object OpenAi {
     ): String {
         val start = SystemClock.elapsedRealtime()
         try {
-            val answer = responsesCall(key, choice.model, choice.reasoning, json, client, onCall)
+            val answer = responsesCall(feature, key, choice.model, choice.reasoning, json, client, onCall)
             AiStatus.report(feature, "${choice.model}: replied in ${SystemClock.elapsedRealtime() - start} ms")
             return answer
         } catch (e: Exception) {
@@ -479,7 +486,7 @@ object OpenAi {
 
     /** One /v1/responses call; returns the model's text. */
     private fun responsesCall(
-        key: String, model: String, effort: String?, json: String,
+        feature: AiFeature, key: String, model: String, effort: String?, json: String,
         client: OkHttpClient = aiHttp, onCall: (Call) -> Unit = {},
     ): String {
         val req = Request.Builder().url("$API/responses")
@@ -489,17 +496,25 @@ object OpenAi {
         val t0 = SystemClock.elapsedRealtime()
         val call = client.newCall(req)
         onCall(call)
-        call.execute().use { r ->
+        var recorded = false
+        var possiblyBilled = !call.isCanceled()
+        try { call.execute().use { r ->
             val text = r.body?.string()
             val ms = SystemClock.elapsedRealtime() - t0
             if (!r.isSuccessful) {
+                possiblyBilled = false
                 val msg = errorMessage(r.code, text)
                 Log.w(TAG, "ai $model effort=$effort -> HTTP ${r.code} in ${ms}ms: ${msg.take(200)}")
                 throw ApiError(r.code, msg)
             }
             val root = JSONObject(text ?: "{}")
+            UsageStore.record(feature, root.optString("model").ifBlank { model }, TokenUsage.parse(root.optJSONObject("usage")),
+                root.optString("service_tier", "default"))
+            recorded = true
             Log.i(TAG, "ai $model effort=$effort -> OK in ${ms}ms, status=${root.optString("status")}")
             return outputText(root) ?: throw ApiError(0, "empty answer")
+        } } finally {
+            if (possiblyBilled && !recorded) UsageStore.record(feature, model, TokenUsage(reported = false))
         }
     }
 }

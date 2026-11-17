@@ -81,6 +81,7 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_OPEN = "open"
         const val OPEN_VOICE = "voice"
         const val OPEN_ABOUT = "about"
+        const val OPEN_AI_MODELS = "ai_models"
     }
 }
 
@@ -153,6 +154,10 @@ fun YboardSettingsApp(openRequest: MutableState<String?> = mutableStateOf(null))
 
     val request = openRequest.value
     LaunchedEffect(request) {
+        if (request == MainActivity.OPEN_AI_MODELS) {
+            stackNames = listOf(Screen.HOME.name, Screen.AI_MODELS.name)
+            openRequest.value = null
+        }
         if (request == MainActivity.OPEN_ABOUT) {
             stackNames = listOf(Screen.HOME.name, Screen.ABOUT.name)
             openRequest.value = null

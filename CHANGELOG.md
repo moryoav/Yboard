@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.0
+
+- Added daily, weekly and monthly AI usage and USD cost estimates to AI models.
+- Added input, output, cached-read and cache-write accounting with model breakdowns.
+- Added duration-based speech cost tracking and persistent private usage storage.
+- Marked incomplete usage and missing prices explicitly, and preserved historical estimates at the rates used when recorded.
+
 ## 1.3.0
 
 - Added update checking under About using public GitHub Releases.

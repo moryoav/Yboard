@@ -9,6 +9,9 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONObject
+import com.yboard.keyboard.settings.AiFeature
+import com.yboard.keyboard.usage.LiveUsageMeter
+import com.yboard.keyboard.usage.UsageStore
 import java.io.ByteArrayOutputStream
 
 /**
@@ -40,6 +43,9 @@ class LiveTranscriber(
 
     private val main = Handler(Looper.getMainLooper())
     private var ws: WebSocket? = null
+    private val model = OpenAi.LIVE_MODEL
+    private val usageMeter = LiveUsageMeter(model)
+    @Volatile private var connected = false
     @Volatile private var closed = false
     @Volatile private var gotText = false
     /** How many settings OpenAI has rejected so far (see [OpenAi.liveSessionJson]). */
@@ -52,6 +58,7 @@ class LiveTranscriber(
             .build()
         ws = OpenAi.http.newWebSocket(req, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
+                connected = true
                 Log.i(TAG, "live: connected")
                 main.post { if (!closed) listener.onConnected() }
             }
@@ -59,6 +66,7 @@ class LiveTranscriber(
             override fun onMessage(webSocket: WebSocket, text: String) = handle(text)
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                finishUsage()
                 if (closed) return
                 closed = true
                 val code = response?.code ?: 0
@@ -76,6 +84,7 @@ class LiveTranscriber(
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                finishUsage()
                 if (closed) return
                 Log.w(TAG, "live: closed by server, code $code ${reason.take(200)}")
                 closed = true
@@ -83,7 +92,7 @@ class LiveTranscriber(
             }
         })
         // OkHttp queues this until the connection opens.
-        ws?.send(OpenAi.liveSessionJson(languages, level = 0, vocabulary = vocabulary, pairs = pairs))
+        ws?.send(OpenAi.liveSessionJson(languages, level = 0, vocabulary = vocabulary, pairs = pairs, model = model))
     }
 
     /** Microphone audio (24 kHz mono 16-bit). Sent in ~100 ms pieces. Any thread. */
@@ -104,13 +113,20 @@ class LiveTranscriber(
         closed = true
         ws?.close(1000, "done")
         ws = null
+        // Allow final completed events to arrive during the WebSocket close handshake.
+        main.postDelayed({ finishUsage() }, 5000)
+    }
+
+    private fun finishUsage() {
+        usageMeter.finish()?.let { UsageStore.record(AiFeature.LIVE, model, it) }
     }
 
     private fun flushLocked() {
         if (pending.size() == 0) return
+        val count = pending.size()
         val audio = Base64.encodeToString(pending.toByteArray(), Base64.NO_WRAP)
         pending.reset()
-        ws?.send(JSONObject().put("type", "input_audio_buffer.append").put("audio", audio).toString())
+        if (ws?.send(JSONObject().put("type", "input_audio_buffer.append").put("audio", audio).toString()) == true && connected) usageMeter.sent(count)
     }
 
     companion object {
@@ -130,6 +146,7 @@ class LiveTranscriber(
                 }
             }
             "conversation.item.input_audio_transcription.completed" -> {
+                usageMeter.completed("$id:${o.optInt("content_index")}", o.optJSONObject("usage"))
                 gotText = true
                 val t = o.optString("transcript")
                 main.post { listener.onCompleted(id, t) }
@@ -149,7 +166,7 @@ class LiveTranscriber(
                 if (level < OpenAi.LAST_SESSION_LEVEL && !gotText && aboutSettings) {
                     level++
                     Log.i(TAG, "live: retrying with fewer settings (level $level)")
-                    ws?.send(OpenAi.liveSessionJson(languages, level, vocabulary, pairs))
+                    ws?.send(OpenAi.liveSessionJson(languages, level, vocabulary, pairs, model))
                 } else if (msg.contains("buffer too small", true) || msg.contains("empty", true)) {
                     main.post { listener.onCommitIgnored() }
                 } else {

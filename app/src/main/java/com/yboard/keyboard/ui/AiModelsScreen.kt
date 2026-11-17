@@ -30,6 +30,7 @@ fun AiModelsScreen(settings: YboardSettings, onBack: () -> Unit) {
     var editing by remember { mutableStateOf<AiFeature?>(null) }
     val statuses by AiStatus.results.collectAsState()
     ScreenScaffold("AI models", onBack) {
+        AiUsageSection()
         HintText("Choose the model each feature uses. Changes apply to new requests. Swipe matching and learned word frequencies run on your phone.")
         Section("Text suggestions & editing") {
             AiFeature.entries.filter { it.text }.forEach { feature ->

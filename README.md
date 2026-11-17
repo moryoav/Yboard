@@ -38,6 +38,7 @@ A clean, customizable Android keyboard for English and Hebrew, styled after Gboa
 - Swipe decoding combines path alignment, endpoints, the bundled frequency dictionary and your local word usage. A rejected swipe guess is not learned as an accepted word.
 - Tapping a word accepts it, inserts a space and immediately offers the next word. Optional AI predictions use GPT-6 Luna with reasoning off by default, with local results available immediately and cancellation of obsolete requests.
 - AI models: choose the model and reasoning for each text feature, plus both transcription models. Load available model IDs from your own OpenAI account. Unsupported choices report an error without silently changing the selection.
+- AI usage and cost: the AI models screen shows input, output and cached token totals with USD cost estimates for today, the last 7 days and the last 30 days. A model breakdown is available. Cache-write charges and duration-billed speech are included separately.
 - Slide-left-on-backspace deletes whole words.
 - Emoji search in English + Hebrew from Unicode CLDR keywords (`assets/emoji/keywords.tsv`),
   kaomoji tab (`assets/emoji/kaomoji.txt`).
@@ -86,3 +87,11 @@ The script runs the logic tests, builds the release APK, checks the original sig
 Every distributed APK belongs in a GitHub Release. APKs, local agent instructions, local settings, credentials and signing files are excluded from source history. The GitHub test workflow runs without signing keys or API keys. Publishing from another trusted machine requires the original signing key; the repository does not store or transfer it.
 
 The app checks stable public releases without GitHub credentials, compares Android version codes, verifies the APK checksum, package, version and signing certificate, and hands installation to Android. Update checks send no keyboard text, typing history or OpenAI key.
+
+## AI usage estimates
+
+Tracking starts when the version with usage accounting first runs on a device. Earlier token usage cannot be recovered from Yboard. Only timestamps, feature/model names, token counts, speech duration and calculated charges are stored. The usage database stays in Android's private no-backup directory and survives app updates; it contains no prompts, replies, recordings or API keys. Records are retained for 90 days.
+
+Costs use the [OpenAI API price card](https://developers.openai.com/api/docs/pricing), checked on November 17, 2026, and are stored at request time. Cached input is already part of total input, and reasoning is already part of output. Ordinary input, cached reads and both cache-write lifetimes are priced once each. Current transcription models use their published per-minute rates; when the API omits duration, sent audio duration is marked as estimated.
+
+These figures cover this Yboard installation, not the whole OpenAI account or its bill. Missing usage, unsupported rates and interrupted requests are identified instead of being presented as fully priced. Prices can change, and the UI shows the date of the bundled price card.

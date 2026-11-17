@@ -92,6 +92,7 @@ object SettingsIndex {
         SettingEntry("Next-word predictions", Screen.TYPING, "$TYPING › Suggestions", "predict next word"),
         SettingEntry("AI predictions", Screen.TYPING, "$TYPING › Suggestions", "ai openai smart learn style"),
         SettingEntry("AI models", Screen.AI_MODELS, "AI models", "model reasoning thinking effort prediction voice transcription", null),
+        SettingEntry("AI usage & cost", Screen.AI_MODELS, "AI models › Usage & estimated cost", "tokens input output cached cost price day week month spending usage", "Usage & estimated cost"),
         SettingEntry("Emoji suggestions", Screen.TYPING, "$TYPING › Suggestions", "emoji pizza אימוג'י"),
         SettingEntry("Emoji sprinkle button", Screen.TYPING, "$TYPING › Suggestions", "emoji sprinkle sparkle ai add emojis ✨ אימוג'י"),
         SettingEntry("Text shortcuts", Screen.SHORTCUTS, TYPING, "shortcuts omw abbreviation expand קיצורים", null),
