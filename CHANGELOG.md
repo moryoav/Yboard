@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.3
+
+- Disabled Android's system spell checker while Yboard is active to prevent incorrect spelling underlines on Hebrew text in apps such as WhatsApp.
+- Kept Yboard's own word suggestions and corrections available.
+
 ## 1.7.2
 
 - Fixed language switching to immediately show the new language's letters from either symbols page, including in the settings preview.

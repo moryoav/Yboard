@@ -7,4 +7,5 @@
 <!-- supportsInlineSuggestions: logins and codes from the autofill service show in Yboard's strip. -->
 <input-method xmlns:android="http://schemas.android.com/apk/res/android"
     android:settingsActivity="com.yboard.keyboard.ui.MainActivity"
+    android:suppressesSpellChecker="true"
     android:supportsInlineSuggestions="true" />
