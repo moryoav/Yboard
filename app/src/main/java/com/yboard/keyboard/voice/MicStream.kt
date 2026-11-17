@@ -10,7 +10,7 @@ import android.media.MediaRecorder
  * Only speech (plus a little before it) is passed on, so silence isn't sent to OpenAI.
  * Listener calls come from the recording thread.
  */
-class MicStream(private val listener: Listener) {
+class MicStream(private val listener: Listener, private val options: VoiceOptions = VoiceOptions()) : VoiceRecorder {
 
     interface Listener {
         fun onAudio(pcm: ByteArray)
@@ -27,21 +27,21 @@ class MicStream(private val listener: Listener) {
     @Volatile private var vad: Vad? = null
 
     /** Someone is talking right now. */
-    val speaking: Boolean get() = vad?.inSpeech == true
+    override val speaking: Boolean get() = vad?.inSpeech == true
 
     /** Let a shorter pause end the current phrase (0 = normal). */
-    fun setQuickEnd(frames: Int) {
+    override fun setQuickEnd(frames: Int) {
         vad?.let { if (it.inSpeech) it.quickEndFrames = frames }
     }
 
-    fun start() {
+    override fun start() {
         if (running) return
         running = true
         thread = Thread({ loop() }, "yboard-mic").apply { start() }
     }
 
     /** Stops recording. A phrase still being spoken is ended, so its words aren't lost. */
-    fun stop() {
+    override fun stop() {
         running = false
     }
 
@@ -68,7 +68,7 @@ class MicStream(private val listener: Listener) {
             listener.onMicStopped()
             return
         }
-        val vad = Vad().also { this.vad = it }
+        val vad = Vad(endFrames = options.endFrames, idleFrames = options.idleFrames).also { this.vad = it }
         val frame = rate / 50                       // 20 ms
         val raw = ShortArray(frame * factor)
         val out = ShortArray(frame)

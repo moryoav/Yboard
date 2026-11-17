@@ -60,7 +60,7 @@ class Vad(
                 idle = 0
             } else {
                 idle++
-                if (idle == idleFrames) sink.longSilence()
+                if (idleFrames > 0 && idle == idleFrames) sink.longSilence()
             }
         } else {
             sink.audio(frame)

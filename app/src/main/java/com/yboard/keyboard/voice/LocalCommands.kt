@@ -152,6 +152,7 @@ object LocalCommands {
     fun preview(spoken: String, smart: Boolean): String? {
         val t = spoken.trim()
         if (t.isEmpty()) return ""
+        if (!smart) return t
         if (mightBeCommand(t)) return null
         if (smart && VoiceEdits.looksLikeCommand(t)) return null
         val words = t.split(Regex("\\s+")).toMutableList()

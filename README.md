@@ -52,6 +52,11 @@ A clean, customizable Android keyboard for English and Hebrew, styled after Gboa
 - Keyboard mic: live words via Realtime transcription (`gpt-live-transcribe`, WebSocket,
   24 kHz PCM, client-side pause detection in `voice/Vad.kt`), shown underlined as you talk.
   If live transcription is unavailable it falls back to one recording per phrase (`gpt-transcribe`).
+- Listening preferences: Faster / Balanced / More accurate transcription, a 250–1500 ms phrase pause,
+  and automatic stop after 8, 15 or 30 seconds of silence, or Never. Balanced and 15 seconds are the defaults.
+- Unfinished phrases stay in memory until confirmed, so slow or disconnected live sessions can recover them in order.
+  Tapping the mic waits for pending words; typing a key, moving the cursor or closing the keyboard ends immediately.
+- Smart commands off types command words literally, including punctuation and send commands.
 - Commands ("delete that", "question mark", "new line", "תמחק את זה"): phrases that look like
   commands go to the selected model (default `gpt-6.1-terra`, Responses API, structured output), which returns
   `{remove, insert}`; `remove` must match the end of the text or nothing is deleted.

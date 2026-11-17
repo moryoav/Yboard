@@ -25,7 +25,13 @@ class KeyboardSmokeInstrumentation : Instrumentation() {
         val result = Bundle()
         try {
             val mode = args.getString("mode")
-            if (mode == "usage_storage") {
+            if (mode == "voice_regression") {
+                var passed = 0
+                var failure: Throwable? = null
+                runOnMainSync { try { passed = VoiceRegression.run(targetContext) + VoiceRegression.transport() } catch (e: Throwable) { failure = e } }
+                failure?.let { throw it }
+                result.putString("result", "$passed voice controller regression scenarios passed; no cloud calls")
+            } else if (mode == "usage_storage") {
                 val fixture = java.io.File(targetContext.cacheDir, "usage-accounting-smoke").apply { mkdirs() }
                 val wrapped = object : android.content.ContextWrapper(targetContext) {
                     override fun getNoBackupFilesDir() = fixture

@@ -1,12 +1,9 @@
 package com.yboard.keyboard.voice
 
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
 import android.view.inputmethod.ExtractedTextRequest
 import android.view.inputmethod.InputConnection
 import java.io.ByteArrayOutputStream
-import java.util.concurrent.Executors
 
 /**
  * AI voice typing, while the mic is on.
@@ -32,6 +29,9 @@ class VoiceTyping(
     private val vocabulary: List<String> = emptyList(),
     /** (English, Hebrew) spellings of your names: a name comes out in the language you're speaking. */
     var namePairs: List<Pair<String, String>> = emptyList(),
+    private val options: VoiceOptions = VoiceOptions(),
+    initialSelection: Int = -1,
+    private val services: VoiceServices = VoiceServices(),
 ) : MicStream.Listener, LiveTranscriber.Listener {
 
     /** What pressing "send" did. */
@@ -66,42 +66,37 @@ class VoiceTyping(
         fun isEnglishWord(word: String): Boolean? = null
     }
 
-    private val main = Handler(Looper.getMainLooper())
-    private val worker = Executors.newSingleThreadExecutor()      // phrase-by-phrase transcription
-    private val aiWorker = Executors.newSingleThreadExecutor()    // the command AI
-    private val mic = MicStream(this)
-    private var live: LiveTranscriber? = null
+    private val main = services.dispatcher
+    private val worker = services.worker
+    private val aiWorker = services.aiWorker
+    private val mic = services.microphone(this, options)
+    @Volatile private var live: VoiceConnection? = null
     private var connected = false
     /** Live transcription isn't available: send each phrase as a recording instead. */
-    private var phraseMode = false
+    @Volatile private var phraseMode = false
+    private var micStopped = false
+    private var cursor = initialSelection
+    private val selection = VoiceSelection(initialSelection)
 
     private class Phrase(val id: String) {
+        var remoteId: String? = null
         val text = StringBuilder()
         var final: String? = null
         var done = false
         /** The phrase's recording (phrase-by-phrase mode), to ask again if it came back in another language. */
         var audio: ByteArray? = null
-        /** Live mode: which recorded phrase this is (they're numbered in order). */
-        var segment = -1
         var retried = false
+        var transcribing = false
+        var watchdog = 0
         val shown: String get() = (final ?: text.toString()).trim()
     }
 
-    /** Recordings of the phrases sent live, by number, to send one again if it comes back in another language. */
-    private val segmentAudio = HashMap<Int, ByteArray>()
-    private var segmentsEnded = 0
-    /** Phrases OpenAI has started on (each live phrase gets the next number, in order). */
-    private var segmentsSeen = 0
     private var toldOnlyHebrewEnglish = false
 
     private val phrases = LinkedHashMap<String, Phrase>()
     private val finishedIds = HashSet<String>()
     private var localIds = 0
-    /**
-     * Phrases we ended before any of their words arrived. We wait for those when stopping.
-     * (Usually words arrive while you're still talking, so this stays 0.)
-     */
-    private var expecting = 0
+    private var commitIds = 0  // mic thread only
     private var thinking: String? = null     // a phrase the AI is deciding about
     private var composing = ""               // what we show underlined in the field
     /** Our copy of the text before the cursor (without the underlined preview). */
@@ -126,7 +121,7 @@ class VoiceTyping(
 
     private val phraseAudio = ByteArrayOutputStream()
 
-    var isActive = false
+    @Volatile var isActive = false
         private set
     private var stopping = false
     private var level = 0f
@@ -136,8 +131,14 @@ class VoiceTyping(
         host.inputConnection()?.let { ic ->
             ic.finishComposingText()
             text.append(ic.getTextBeforeCursor(MAX_TEXT, 0) ?: "")
+            if (cursor < 0) {
+                ic.getExtractedText(ExtractedTextRequest(), 0)?.let { extracted ->
+                    cursor = extracted.startOffset + minOf(extracted.selectionStart, extracted.selectionEnd)
+                    selection.reset(cursor)
+                }
+            }
         }
-        live = LiveTranscriber(apiKey, languages, this, vocabulary, namePairs).also { it.connect() }
+        live = services.connection(apiKey, languages, this, vocabulary, namePairs, options).also { it.connect() }
         mic.start()
         ui()
     }
@@ -148,8 +149,7 @@ class VoiceTyping(
         stopping = true
         mic.stop()
         ui()
-        // Never hang around: give OpenAI a few seconds for the last words, the AI (or a send) a bit longer.
-        main.postDelayed({ if (thinking == null && sending == null) end() else main.postDelayed({ end() }, 8000) }, 4000)
+        // Each pending phrase has its own watchdog and bounded fallback request. Never discard it on a fixed stop timer.
     }
 
     /** End right away (a key was typed, or the keyboard closed). Dictated words shown so far stay. */
@@ -159,13 +159,32 @@ class VoiceTyping(
         mic.stop()
         live?.close()
         live = null
-        main.removeCallbacksAndMessages(null)
+        main.cancelAll()
         worker.shutdownNow()
         aiWorker.shutdownNow()
         if (composing.isNotEmpty()) host.inputConnection()?.finishComposingText()
         composing = ""
+        phrases.clear()
+        commitPhrases.clear()
+        synchronized(phraseAudio) { phraseAudio.reset() }
         host.onVoiceUi(null, 0f, false)
     }
+
+    /** A cursor move changes what commands refer to. Finish the preview and stop safely. */
+    fun onSelectionChanged(start: Int, end: Int) {
+        if (!isActive || sending != null) return
+        if (cursor < 0 && start >= 0 && start == end) {
+            cursor = (start - composing.length).coerceAtLeast(0)
+            selection.reset(start)
+            return
+        }
+        if (selection.moved(start, end)) {
+            host.showMessage("Voice typing stopped because the cursor moved. Tap the mic to continue here.")
+            end()
+        }
+    }
+
+    private fun expectCursor(position: Int) { selection.expect(position) }
 
     private fun fail(message: String) {
         host.showMessage(message)
@@ -175,13 +194,19 @@ class VoiceTyping(
     // ------------------------------------------------------------- microphone
 
     override fun onAudio(pcm: ByteArray) {
+        if (!isActive) return
         synchronized(phraseAudio) { phraseAudio.write(pcm) }
         if (!phraseMode) live?.append(pcm)
     }
 
     override fun onPhraseEnd() {
+        if (!isActive) return
         val audio = synchronized(phraseAudio) { phraseAudio.toByteArray().also { phraseAudio.reset() } }
-        main.post { phraseEnded(audio) }
+        val id = "yboard-turn-${++commitIds}"
+        val connection = if (!phraseMode) live else null
+        main.post { phraseEnded(id, audio) }
+        // Commit on the recording thread so new-phrase audio cannot overtake this boundary.
+        connection?.commit(id)
     }
 
     override fun onLevel(level: Float) {
@@ -197,25 +222,31 @@ class VoiceTyping(
     }
 
     override fun onMicStopped() {
-        main.post { if (stopping) finishIfIdle() }
+        main.post { if (isActive) { micStopped = true; if (stopping) finishIfIdle() } }
     }
 
-    private fun phraseEnded(audio: ByteArray) {
+    private fun phraseEnded(id: String, audio: ByteArray) {
         if (!isActive) return
-        if (!phraseMode) {
-            live?.commit()
-            segmentAudio[segmentsEnded] = audio
-            segmentsEnded++
-            segmentAudio.keys.removeAll { it < segmentsEnded - 10 }
-            if (phrases.values.none { !it.done }) expecting++
-        } else if (audio.size >= OpenAi.SAMPLE_RATE * 2 / 4) {  // at least 250 ms
-            transcribeRecording(audio)
+        val p = phrases.values.firstOrNull { it.audio == null && !it.done } ?: newPhrase()
+        p.audio = audio
+        commitPhrases[id] = p
+        if (phraseMode) transcribeRecording(p) else {
+            val version = ++p.watchdog
+            main.postDelayed({
+                if (isActive && !p.done && !p.transcribing && version == p.watchdog) {
+                    useRecordings("Live transcription is taking too long. Retrying the unfinished words.")
+                }
+            }, 12000)
         }
     }
+
+    private val commitPhrases = HashMap<String, Phrase>()
+    private fun newPhrase(): Phrase = Phrase("local-${++localIds}").also { phrases[it.id] = it }
 
     // ------------------------------------------------------- live transcription
 
     override fun onConnected() {
+        if (!isActive || phraseMode) return
         connected = true
         ui()
     }
@@ -224,10 +255,12 @@ class VoiceTyping(
         phraseFor(itemId)
     }
 
-    override fun onCommitIgnored() {
-        segmentsSeen++  // that recording had no speech, so no words will come for it
-        if (expecting > 0) expecting--
-        if (stopping) finishIfIdle()
+    override fun onCommitIgnored(turnId: String?) {
+        if (!isActive || phraseMode) return
+        val p = if (turnId != null) commitPhrases[turnId] else phrases.values.firstOrNull { it.audio != null && !it.done }
+        p ?: return
+        p.done = true
+        pump()
     }
 
     private val firstWordsLogged = HashSet<String>()
@@ -237,7 +270,7 @@ class VoiceTyping(
         if (firstWordsLogged.add(itemId)) Log.i(TAG, "first words arrived (still talking: ${mic.speaking})")
         p.text.append(delta)
         // A whole command so far? Then a short pause is enough to carry it out.
-        if (!p.done && p === phrases.values.lastOrNull()) mic.setQuickEnd(LocalCommands.quickEndFrames(p.shown))
+        if (smartCommands && !p.done && p === phrases.values.lastOrNull()) mic.setQuickEnd(LocalCommands.quickEndFrames(p.shown))
         showComposing()
     }
 
@@ -253,6 +286,7 @@ class VoiceTyping(
 
     /** A phrase's words arrived: use them, unless they're not Hebrew or English. */
     private fun finishPhrase(p: Phrase, heard: String) {
+        if (!isActive || p.done) return
         if (heard.isNotBlank() && Scripts.notHebrewOrEnglish(heard, host::isEnglishWord, myNames)) {
             askAgainInHebrewOrEnglish(p, heard)
             return
@@ -267,12 +301,14 @@ class VoiceTyping(
      * allowing only Hebrew and English. If that still fails, the other-language words are dropped.
      */
     private fun askAgainInHebrewOrEnglish(p: Phrase, heard: String) {
-        val audio = p.audio ?: segmentAudio[p.segment]
+        if (!isActive) return
+        val audio = p.audio
         if (audio == null || p.retried || audio.size < OpenAi.SAMPLE_RATE * 2 / 4) {
             dropOtherLanguage(p, heard, couldAsk = false)
             return
         }
         p.retried = true
+        p.transcribing = true
         p.final = ""  // don't show the wrong words meanwhile
         // The language you're most likely speaking first (Arabic letters usually mean it was Hebrew).
         val first = if (Scripts.looksSemitic(heard) || hebrewNow()) "he" else "en"
@@ -285,13 +321,14 @@ class VoiceTyping(
             var reached = false
             for (lang in order) {
                 val r = runCatching {
-                    OpenAi.transcribeFile(apiKey, wav, listOf(lang), context, vocabulary, namePairs, onlyLanguage = lang)
+                    services.transcribe(apiKey, wav, listOf(lang), context, vocabulary, namePairs, onlyLanguage = lang)
                 }.getOrNull() ?: continue
                 reached = true
                 if (r.isNotBlank() && !Scripts.hasForeign(r) && !Scripts.hasAccents(r)) { result = r; break }
             }
             main.post {
                 if (!isActive) return@post
+                p.transcribing = false
                 val ok = result
                 if (ok == null) {
                     dropOtherLanguage(p, heard, couldAsk = reached)
@@ -322,60 +359,64 @@ class VoiceTyping(
     }
 
     override fun onFailed(itemId: String?, message: String) {
-        if (itemId.isNullOrEmpty()) {
-            Log.w(TAG, "live transcription error")
-            return
-        }
-        val p = phraseFor(itemId) ?: return
-        p.done = true  // keep whatever words arrived
-        pump()
+        if (!isActive || phraseMode) return
+        Log.w(TAG, "live transcription error, recovering unfinished audio")
+        useRecordings("Live transcription failed. Retrying with recorded phrases.")
     }
 
     override fun onClosed(message: String?, code: Int) {
-        if (!isActive) return
-        live = null
+        if (!isActive || phraseMode) return
         when {
             code == 401 || code == 403 -> fail(OpenAi.friendly(OpenAi.ApiError(code, message ?: "")))
             code == 429 -> fail(OpenAi.friendly(OpenAi.ApiError(code, message ?: "")))
-            stopping -> { expecting = 0; phrases.values.forEach { it.done = true }; pump() }
-            else -> {
-                // Live words aren't available (or the connection dropped): carry on phrase by phrase.
-                Log.w(TAG, "live transcription closed ($code), using phrase mode")
-                phraseMode = true
-                connected = true
-                expecting = 0
-                phrases.values.forEach { it.done = true }
-                pump()
-                ui()
-            }
+            else -> useRecordings("The live connection dropped. Retrying with recorded phrases.")
         }
     }
 
+    private fun useRecordings(message: String) {
+        if (!isActive || phraseMode) return
+        phraseMode = true // Ignore callbacks from the old connection before closing it.
+        live?.close()
+        live = null
+        connected = true
+        host.showMessage(message)
+        phrases.values.toList().filter { !it.done && it.audio != null && !it.transcribing }.forEach { transcribeRecording(it) }
+        ui()
+        if (stopping) finishIfIdle()
+    }
+
     private fun phraseFor(id: String): Phrase? {
-        if (id.isEmpty() || id in finishedIds) return null
-        return phrases.getOrPut(id) {
-            if (expecting > 0) expecting--
-            Phrase(id).also { if (!phraseMode) it.segment = segmentsSeen++ }
-        }
+        if (!isActive || phraseMode || id.isEmpty() || id in finishedIds) return null
+        phrases.values.firstOrNull { it.remoteId == id }?.let { return if (it.transcribing) null else it }
+        val p = phrases.values.firstOrNull { it.remoteId == null && !it.done } ?: newPhrase()
+        p.remoteId = id
+        return p
     }
 
     // ------------------------------------------------------------ phrase mode
 
-    private fun transcribeRecording(pcm: ByteArray) {
-        val p = Phrase("local-${++localIds}")
-        p.audio = pcm
-        phrases[p.id] = p
+    private fun transcribeRecording(p: Phrase) {
+        if (!isActive || p.done || p.transcribing) return
+        val pcm = p.audio ?: return
+        if (pcm.isEmpty()) { p.done = true; pump(); return }
+        p.transcribing = true
+        p.watchdog++
         val context = text.toString()
         ui()
         worker.execute {
-            val result = runCatching { OpenAi.transcribeFile(apiKey, Wav.encode(pcm, OpenAi.SAMPLE_RATE), languages, context, vocabulary, namePairs) }
+            val result = runCatching { services.transcribe(apiKey, Wav.encode(pcm, OpenAi.SAMPLE_RATE), languages, context, vocabulary, namePairs) }
             main.post {
                 if (!isActive) return@post
+                p.transcribing = false
                 result.exceptionOrNull()?.let { e ->
                     if (e is OpenAi.ApiError && e.code in setOf(401, 403, 429)) { fail(OpenAi.friendly(e)); return@post }
-                    host.showMessage(OpenAi.friendly(e))
+                    host.showMessage("Couldn't finish a recorded phrase. Words already received were kept. ${OpenAi.friendly(e)}")
                 }
-                finishPhrase(p, result.getOrNull().orEmpty())
+                val heard = result.getOrNull()
+                if (heard != null && heard.isBlank() && p.shown.isNotBlank()) {
+                    host.showMessage("The recording returned no words. The live words were kept.")
+                }
+                finishPhrase(p, heard?.takeIf { it.isNotBlank() } ?: p.shown)
             }
         }
     }
@@ -389,7 +430,8 @@ class VoiceTyping(
             val head = phrases.values.firstOrNull() ?: break
             if (!head.done) break
             phrases.remove(head.id)
-            finishedIds.add(head.id)
+            head.remoteId?.let { finishedIds.add(it) }
+            commitPhrases.entries.removeAll { it.value === head }
             val spoken = head.shown
             if (spoken.isNotEmpty()) handlePhrase(spoken)
         }
@@ -410,6 +452,10 @@ class VoiceTyping(
     private fun handlePhrase(spoken: String) {
         val n = ++phraseCount
         val before = text.toString()
+        if (!smartCommands) {
+            apply(VoiceEdit("", spoken), remember = true)
+            return
+        }
         // 1) Simple commands, instantly and without the internet.
         LocalCommands.match(spoken, before, lastTyped(before))?.let { m ->
             Log.i(TAG, "phrase $n: command ${m.kind}")
@@ -443,7 +489,7 @@ class VoiceTyping(
         val last = lastTyped(before).orEmpty()
         aiWorker.execute {
             val edit = try {
-                OpenAi.command(apiKey, context, last, spoken, keyboardLanguage)
+                services.command(apiKey, context, last, spoken, keyboardLanguage)
             } catch (e: Exception) {
                 Log.w(TAG, "phrase $n: AI failed: ${e.javaClass.simpleName} ${e.message?.take(160)}")
                 null
@@ -480,10 +526,13 @@ class VoiceTyping(
         }
         ic.beginBatchEdit()
         if (composing.isNotEmpty()) {
+            expectCursor(cursor)
             ic.setComposingText("", 1)
             composing = ""
         }
+        expectCursor(0)
         ic.deleteSurroundingText(1_000_000, 1_000_000)  // apps limit this to the text there is
+        cursor = 0
         ic.endBatchEdit()
         deletedAll = whole ?: text.toString()
         text.setLength(0)
@@ -498,6 +547,7 @@ class VoiceTyping(
         if (sending != null) return  // "send. send." is one send
         val ic = host.inputConnection() ?: return
         if (composing.isNotEmpty()) {
+            expectCursor(cursor)
             ic.setComposingText("", 1)
             composing = ""
         }
@@ -588,6 +638,10 @@ class VoiceTyping(
             text.setLength(0)
             text.append(now)
         }
+        host.inputConnection()?.getExtractedText(ExtractedTextRequest(), 0)?.let { extracted ->
+            cursor = extracted.startOffset + minOf(extracted.selectionStart, extracted.selectionEnd)
+            selection.reset(cursor)
+        }
         ui()
         pump()
     }
@@ -599,9 +653,12 @@ class VoiceTyping(
         deletedAll = null
         ic.beginBatchEdit()
         if (composing.isNotEmpty()) {
+            expectCursor(cursor)
             ic.setComposingText("", 1)
             composing = ""
         }
+        if (cursor >= 0) cursor += saved.length
+        expectCursor(cursor)
         ic.commitText(saved, 1)
         ic.endBatchEdit()
         text.setLength(0)
@@ -627,15 +684,20 @@ class VoiceTyping(
         if (n < 0) Log.w(TAG, "edit: text to remove wasn't at the end, nothing removed")
         ic.beginBatchEdit()
         if (composing.isNotEmpty()) {
+            expectCursor(cursor)
             ic.setComposingText("", 1)
             composing = ""
         }
         if (n > 0) {
+            if (cursor >= 0) cursor = (cursor - n).coerceAtLeast(0)
+            expectCursor(cursor)
             ic.deleteSurroundingText(n, 0)
             text.setLength(text.length - n)
         }
         val insert = VoiceEdits.forInsert(text.toString(), edit.insert)
         if (insert.isNotEmpty()) {
+            if (cursor >= 0) cursor += insert.length
+            expectCursor(cursor)
             ic.commitText(insert, 1)
             text.append(insert)
             if (text.length > MAX_TEXT * 2) text.delete(0, text.length - MAX_TEXT)
@@ -662,6 +724,7 @@ class VoiceTyping(
         val joined = shown.joinToString(" ")
         val preview = if (joined.isEmpty()) "" else VoiceEdits.forInsert(text.toString(), joined)
         if (preview != composing) {
+            if (cursor >= 0) expectCursor(cursor + preview.length)
             ic.setComposingText(preview, 1)
             composing = preview
         }
@@ -678,7 +741,7 @@ class VoiceTyping(
 
     private fun finishIfIdle() {
         if (!isActive) return
-        if (phrases.isEmpty() && thinking == null && expecting == 0 && sending == null) end()
+        if (micStopped && phrases.isEmpty() && thinking == null && sending == null) end()
     }
 
     private fun ui() {
@@ -690,7 +753,8 @@ class VoiceTyping(
             thinking != null -> "Working on “${thinking!!.take(40)}”…"
             heard != null -> "“${heard.take(48)}”"
             !connected -> "Connecting…"
-            phraseMode && phrases.isNotEmpty() -> "Writing…"
+            phraseMode && phrases.isNotEmpty() -> "Transcribing recording…"
+            phraseMode -> "Listening… recorded phrases"
             else -> "Listening… tap the mic to stop"
         }
         host.onVoiceUi(status, level, !stopping)

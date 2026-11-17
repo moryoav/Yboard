@@ -332,6 +332,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     }
 
     override fun onFinishInput() {
+        endVoice()
         super.onFinishInput()
         cancelAiPredictions()
         clearAutofill()
@@ -381,6 +382,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
         selStart = newSelStart
         selEnd = newSelEnd
+        voice?.onSelectionChanged(newSelStart, newSelEnd)
         if (bsOrigin >= 0) return  // we're selecting words with the backspace slide
         updateAutoShift()
         updateSuggestions()
@@ -1320,6 +1322,8 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
             host = voiceHost,
             vocabulary = settings.myWords,
             namePairs = settings.myWordPairs,
+            options = settings.voiceOptions,
+            initialSelection = minOf(selStart, selEnd),
         ).also { it.start() }
     }
 

@@ -40,6 +40,8 @@ import com.yboard.keyboard.settings.Prefs
 import com.yboard.keyboard.settings.YboardSettings
 import com.yboard.keyboard.voice.ApiKeyStore
 import com.yboard.keyboard.voice.OpenAi
+import com.yboard.keyboard.voice.TranscriptionQuality
+import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -221,21 +223,43 @@ fun VoiceScreen(settings: YboardSettings, onBack: () -> Unit) {
             }
             SwitchRow(
                 "Smart commands",
-                "Understands \"delete that\", \"new line\", \"question mark\" and more, in English and Hebrew",
+                "Editing, punctuation and send commands in English and Hebrew. When off, their words are typed literally.",
                 settings.voiceCommands,
             ) { b -> Prefs.update { it.copy(voiceCommands = b) } }
+        }
+
+        Section("Listening preferences", searchable = true) {
+            ChipRow("Transcription", TranscriptionQuality.entries.map { it.label }, settings.voiceQuality.ordinal) { i ->
+                Prefs.update { it.copy(voiceQuality = TranscriptionQuality.entries[i]) }
+            }
+            HintText(when (settings.voiceQuality) {
+                TranscriptionQuality.FASTER -> "Words appear sooner, with less audio context."
+                TranscriptionQuality.BALANCED -> "Balances quick results with more context for accuracy."
+                TranscriptionQuality.ACCURATE -> "Waits for more audio context. Words may take longer to appear."
+            })
+            SliderRow("Phrase pause", settings.voicePauseMs.toFloat(), 250f..1500f,
+                "${settings.voicePauseMs} ms", steps = 24) { value ->
+                Prefs.update { it.copy(voicePauseMs = (value / 50).roundToInt() * 50) }
+            }
+            HintText("A longer pause gives you more time to think before a phrase is finalized. Clear commands can finish sooner.")
+            val silenceChoices = listOf(8, 15, 30, 0)
+            ChipRow("Stop after silence", listOf("8 sec", "15 sec", "30 sec", "Never"),
+                silenceChoices.indexOf(settings.voiceSilenceSeconds)) { i ->
+                Prefs.update { it.copy(voiceSilenceSeconds = silenceChoices[i]) }
+            }
+            HintText("Never keeps the mic on until you stop it, type a key, move the cursor, or close the keyboard.")
         }
 
         Section("How to use it", searchable = true) {
             Text(
                 "Tap the mic on the keyboard and talk. Your words appear as you say them. " +
-                    "Tap the mic again, or any key, to stop.",
+                    "Tap the mic again to finish the last words. Typing a key, moving the cursor, or closing the keyboard stops it immediately.",
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp),
             )
             Fold("Things you can say", Modifier.padding(start = 18.dp, end = 20.dp, bottom = 8.dp)) {
                 Text(
-                    "It also stops by itself after 8 seconds of quiet.\n\n" +
+                    "Choose when it stops after silence in Listening preferences. Commands below work when Smart commands is on.\n\n" +
                     "Try saying:\n" +
                     "•  \"hi question mark\" → hi?\n" +
                     "•  \"delete that\" → removes what you just said\n" +

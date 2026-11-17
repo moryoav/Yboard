@@ -171,6 +171,9 @@ data class YboardSettings(
     val voiceLanguages: String = "auto",
     /** AI voice typing understands "delete that", "new line", "question mark"... */
     val voiceCommands: Boolean = true,
+    val voiceQuality: com.yboard.keyboard.voice.TranscriptionQuality = com.yboard.keyboard.voice.TranscriptionQuality.BALANCED,
+    val voicePauseMs: Int = 500,
+    val voiceSilenceSeconds: Int = 15,
     /** Android 16+: hide the bar Android adds under the keys (switch-keyboard and hide buttons). */
     val hideSystemBar: Boolean = true,
     /** Suggest the next word after a space. */
@@ -205,6 +208,9 @@ data class YboardSettings(
             "he" -> listOf("he")
             else -> listOf("he", "en")
         }
+
+    val voiceOptions: com.yboard.keyboard.voice.VoiceOptions get() =
+        com.yboard.keyboard.voice.VoiceOptions(voiceQuality, voicePauseMs, voiceSilenceSeconds)
 
     /**
      * "Reset customizations": back to the default look (Yboard Dark, like Gboard).
@@ -248,6 +254,7 @@ data class YboardSettings(
         put("trailCustomColor", trailCustomColor); put("trailGlow", trailGlow)
         put("soundStyle", soundStyle)
         put("voiceLanguages", voiceLanguages); put("voiceCommands", voiceCommands)
+        put("voiceQuality", voiceQuality.name); put("voicePauseMs", voicePauseMs); put("voiceSilenceSeconds", voiceSilenceSeconds)
         put("hideSystemBar", hideSystemBar)
         put("nextWords", nextWords); put("emojiSuggest", emojiSuggest)
         put("sendHelperPrompt", sendHelperPrompt)
@@ -312,6 +319,9 @@ data class YboardSettings(
                     soundStyle = o.optString("soundStyle", d.soundStyle),
                     voiceLanguages = o.optString("voiceLanguages", d.voiceLanguages),
                     voiceCommands = o.optBoolean("voiceCommands", d.voiceCommands),
+                    voiceQuality = enumOr(o.optString("voiceQuality"), d.voiceQuality),
+                    voicePauseMs = o.optInt("voicePauseMs", d.voicePauseMs).coerceIn(250, 1500),
+                    voiceSilenceSeconds = o.optInt("voiceSilenceSeconds", d.voiceSilenceSeconds).let { if (it == 0) 0 else it.coerceIn(8, 60) },
                     hideSystemBar = o.optBoolean("hideSystemBar", d.hideSystemBar),
                     nextWords = o.optBoolean("nextWords", d.nextWords),
                     emojiSuggest = o.optBoolean("emojiSuggest", d.emojiSuggest),

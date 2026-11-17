@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.5.0
+
+- Preserved unfinished dictation across slow responses and live connection failures, with ordered recorded-phrase recovery.
+- Added session readiness checks, bounded transcription requests, and visible recovery messages.
+- Prevented late callbacks from editing text or starting work after dictation ends.
+- Stopped dictation safely when the cursor moves, and made Smart commands off type commands literally.
+- Added Faster, Balanced and More accurate transcription modes, adjustable phrase pauses, and silence timeout choices including Never.
+
 ## 1.4.0
 
 - Added daily, weekly and monthly AI usage and USD cost estimates to AI models.

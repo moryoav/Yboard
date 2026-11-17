@@ -82,6 +82,7 @@ object OpenAi {
 
     /** For the command AI: give up after 20 s instead of hanging. */
     private val aiHttp: OkHttpClient by lazy { http.newBuilder().callTimeout(20, TimeUnit.SECONDS).build() }
+    private val transcriptionHttp: OkHttpClient by lazy { http.newBuilder().callTimeout(30, TimeUnit.SECONDS).build() }
     private val predictionHttp: OkHttpClient by lazy { http.newBuilder().callTimeout(4, TimeUnit.SECONDS).build() }
 
     /** Available IDs from this account. Choosing an ID never silently changes another feature. */
@@ -148,12 +149,13 @@ object OpenAi {
     fun liveSessionJson(
         languages: List<String>, level: Int, vocabulary: List<String> = emptyList(), pairs: List<Pair<String, String>> = emptyList(),
         model: String = LIVE_MODEL,
+        delay: String = "low",
     ): String {
         val transcription = JSONObject().put("model", model)
         if (level <= 2) transcription.put("languages", JSONArray(languages))
         if (level <= 1) transcription.put("prompt", speechPrompt(vocabulary, pairs))
         if (level == 0) {
-            transcription.put("delay", "low")
+            transcription.put("delay", delay)
             transcription.put("keywords", JSONArray(speechKeywords(vocabulary, pairs)))
         }
         val input = JSONObject()
@@ -193,7 +195,7 @@ object OpenAi {
             .post(body.build())
             .build()
         val t0 = SystemClock.elapsedRealtime()
-        http.newCall(req).execute().use { r ->
+        transcriptionHttp.newCall(req).execute().use { r ->
             val text = r.body?.string()
             val ms = SystemClock.elapsedRealtime() - t0
             if (!r.isSuccessful) {
