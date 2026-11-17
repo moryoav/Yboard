@@ -35,7 +35,7 @@ function Read-Probe([string]$Name) {
         location = ($nodes | Where-Object 'content-desc' -EQ 'Sticker button location').text
     }
 }
-$results = foreach ($mode in @('accept', 'wildcard', 'reject', 'none', 'png')) {
+$results = foreach ($mode in @('whatsapp', 'both', 'accept', 'wildcard', 'reject', 'none', 'png')) {
     Invoke-Adb @('shell', 'am', 'start', '-W', '-n', 'com.yboard.keyboard.test/com.yboard.keyboard.test.StickerProbeActivity',
         '-f', '0x10008000', '--es', 'mode', $mode) | Out-Null
     $before = Read-Probe "$mode-before"
@@ -52,6 +52,8 @@ $results = foreach ($mode in @('accept', 'wildcard', 'reject', 'none', 'png')) {
     Invoke-Adb @('shell', 'input', 'tap', $Matches[1], $Matches[2]) | Out-Null
     $after = Read-Probe "$mode-after"
     $expected = switch ($mode) {
+        'whatsapp' { 'Received #1 transparent 512x512 WebP' }
+        'both' { 'Received #1 transparent 512x512 WebP' }
         'accept' { 'Received #1 transparent 512x512 WebP' }
         'wildcard' { 'Received #1 transparent 512x512 WebP' }
         'reject' { 'Rejected as requested' }
@@ -63,4 +65,4 @@ $results = foreach ($mode in @('accept', 'wildcard', 'reject', 'none', 'png')) {
 }
 $results | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $OutputDirectory 'results.json') -Encoding utf8NoBOM
 $results | Format-Table -AutoSize
-Write-Output 'All 5 sticker handoff scenarios passed.'
+Write-Output 'All 7 sticker handoff scenarios passed.'

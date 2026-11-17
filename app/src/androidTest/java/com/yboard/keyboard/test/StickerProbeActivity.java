@@ -61,7 +61,10 @@ public class StickerProbeActivity extends Activity {
         editor = new EditText(this) {
             @Override public InputConnection onCreateInputConnection(EditorInfo attrs) {
                 InputConnection base = super.onCreateInputConnection(attrs);
-                attrs.contentMimeTypes = "none".equals(mode) ? new String[0]
+                attrs.contentMimeTypes = "whatsapp".equals(mode)
+                    ? new String[]{"image/gif", "video/x.looping_mp4", "image/jpeg", "image/jpg", "image/png", "image/webp.wasticker"}
+                    : "both".equals(mode) ? new String[]{"image/webp", "image/webp.wasticker"}
+                    : "none".equals(mode) ? new String[0]
                     : new String[]{"png".equals(mode) ? "image/png" : "wildcard".equals(mode) ? "image/*" : "image/webp"};
                 return new InputConnectionWrapper(base, false) {
                     @Override public boolean commitContent(InputContentInfo content, int flags, Bundle opts) {
@@ -70,7 +73,8 @@ public class StickerProbeActivity extends Activity {
                         try {
                             if ((flags & 1) == 0) throw new AssertionError("Missing read permission flag");
                             content.requestPermission();
-                            if (!content.getDescription().hasMimeType("image/webp")) throw new AssertionError("Wrong MIME type");
+                            String mime = "whatsapp".equals(mode) || "both".equals(mode) ? "image/webp.wasticker" : "image/webp";
+                            if (!content.getDescription().hasMimeType(mime)) throw new AssertionError("Wrong MIME type");
                             if (!"image/webp".equals(getContentResolver().getType(content.getContentUri()))) throw new AssertionError("Provider MIME mismatch");
                             byte[] bytes;
                             try (InputStream input = getContentResolver().openInputStream(content.getContentUri());
@@ -87,7 +91,7 @@ public class StickerProbeActivity extends Activity {
                                 || Color.alpha(bitmap.getPixel(0, 0)) != 0 || Color.alpha(bitmap.getPixel(511, 511)) != 0)
                                 throw new AssertionError("Wrong dimensions or transparency");
                             image.setImageBitmap(bitmap);
-                            result = "Received #" + received + " transparent 512x512 WebP (" + bytes.length + " bytes) with read permission";
+                            result = "Received #" + received + " transparent 512x512 WebP (" + bytes.length + " bytes) with read permission as " + mime;
                             status.setText(result);
                             return true;
                         } catch (Throwable error) {

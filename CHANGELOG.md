@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.6.1
+
+- Fixed WhatsApp sticker insertion by using its advertised image/webp.wasticker content type.
+- Added regression coverage for WhatsApp's actual advertised formats and sticker-type preference.
+
 ## 1.6.0
 
 - Added a bundled transparent WebP sticker and a Test button beside the keyboard microphone.
