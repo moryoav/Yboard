@@ -27,6 +27,11 @@ function Invoke-Gh([string[]]$GhArguments) {
     if ($LASTEXITCODE -ne 0) { throw "GitHub CLI failed: $($GhArguments[0])" }
     return $result
 }
+function Get-Release([string]$ReleaseTag) {
+    # The by-tag REST endpoint only returns published releases. The authenticated list includes drafts.
+    $items = (Invoke-Gh @('api', "repos/$repo/releases?per_page=100")) | ConvertFrom-Json
+    return $items | Where-Object tag_name -EQ $ReleaseTag | Select-Object -First 1
+}
 
 $account = Invoke-Gh @('api', 'user', '--jq', '.login')
 if ($account -ne 'moryoav') { throw 'Select the moryoav GitHub CLI account before publishing.' }
@@ -110,9 +115,8 @@ if ($LASTEXITCODE -eq 0) {
     Invoke-Git @('tag', '-a', $tag, '-m', "Release $versionName") | Out-Null
 }
 Invoke-Git @('push', 'origin', "refs/tags/$tag") | Out-Null
-$existingJson = & gh api "repos/$repo/releases/tags/$tag" 2>$null
-if ($LASTEXITCODE -eq 0) {
-    $existing = $existingJson | ConvertFrom-Json
+$existing = Get-Release $tag
+if ($existing) {
     if (-not $existing.draft) { throw 'This release is already published. Bump the version instead of replacing it.' }
     Invoke-Gh @('release', 'upload', $tag, $publishedApk, $manifestPath, '--repo', $repo, '--clobber') | Out-Null
     Invoke-Gh @('release', 'edit', $tag, '--repo', $repo, '--notes-file', $NotesFile) | Out-Null
@@ -121,7 +125,7 @@ if ($LASTEXITCODE -eq 0) {
     if ($prerelease) { $create += '--prerelease' }
     Invoke-Gh $create | Out-Null
 }
-$saved = (Invoke-Gh @('api', "repos/$repo/releases/tags/$tag")) | ConvertFrom-Json
+$saved = Get-Release $tag
 $uploadedApk = $saved.assets | Where-Object name -EQ $apkName
 if ($uploadedApk.state -ne 'uploaded' -or $uploadedApk.size -ne (Get-Item -LiteralPath $publishedApk).Length -or $uploadedApk.digest -ne "sha256:$sha256") {
     throw 'The uploaded APK did not match the local APK. The release remains a draft.'
