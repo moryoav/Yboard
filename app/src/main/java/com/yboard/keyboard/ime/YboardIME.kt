@@ -1117,6 +1117,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
             ToolbarView.Action.THEMES -> openThemes()
             ToolbarView.Action.EDIT -> openEditing()
             ToolbarView.Action.SPRINKLE -> { r.closePanel(); sprinkleEmojis() }
+            ToolbarView.Action.TEST_STICKER -> { r.closePanel(); sendTestSticker() }
             ToolbarView.Action.ONE_HANDED -> {
                 r.closePanel()
                 Prefs.update { it.copy(oneHanded = if (it.oneHanded == OneHanded.OFF) OneHanded.RIGHT else OneHanded.OFF) }
@@ -1131,6 +1132,17 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         if (screen != null) intent.putExtra(MainActivity.EXTRA_OPEN, screen)
         startActivity(intent)
         requestHideSelf(0)
+    }
+
+    private fun sendTestSticker() {
+        val result = com.yboard.keyboard.stickers.TestSticker.send(this, currentInputConnection, editorInfo)
+        val message = when (result) {
+            com.yboard.keyboard.stickers.TestSticker.Result.ACCEPTED -> "The app accepted the test sticker."
+            com.yboard.keyboard.stickers.TestSticker.Result.UNSUPPORTED -> "This app doesn't accept WebP stickers from keyboards."
+            com.yboard.keyboard.stickers.TestSticker.Result.REJECTED -> "This app rejected the test sticker."
+            com.yboard.keyboard.stickers.TestSticker.Result.FAILED -> "Couldn't send the test sticker. Try again."
+        }
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
 
     // ------------------------------------------------------ ✨ emoji sprinkle

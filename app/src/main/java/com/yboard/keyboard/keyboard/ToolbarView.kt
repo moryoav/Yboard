@@ -7,6 +7,8 @@ import android.graphics.Paint
 import android.graphics.drawable.Drawable
 import android.os.Handler
 import android.os.Looper
+import android.os.Bundle
+import android.view.accessibility.AccessibilityNodeInfo
 import android.view.MotionEvent
 import android.view.View
 import androidx.core.content.ContextCompat
@@ -24,7 +26,12 @@ import kotlin.math.roundToInt
  */
 class ToolbarView(context: Context) : View(context) {
 
-    enum class Action { MENU, UNDO, CLIPBOARD, THEMES, EDIT, ONE_HANDED, SPRINKLE, MIC }
+    enum class Action { MENU, UNDO, CLIPBOARD, THEMES, EDIT, ONE_HANDED, SPRINKLE, TEST_STICKER, MIC }
+
+    init {
+        importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
+        contentDescription = "Keyboard tools"
+    }
 
     interface Listener {
         fun onToolbar(action: Action)
@@ -104,9 +111,11 @@ class ToolbarView(context: Context) : View(context) {
 
     private val micR get() = dp(19f)
     private val micCx get() = width - dp(10f) - micR
-    private val step get() = (micCx - micR - dp(6f)) / items.size
+    private val stickerCx get() = micCx - dp(46f)
+    private val toolsRight get() = (if (voiceStatus == null) stickerCx else micCx) - micR - dp(6f)
+    private val step get() = toolsRight / items.size
     private val slotsLeft get() = step
-    private val slotsRight get() = micCx - micR - dp(8f)
+    private val slotsRight get() = toolsRight - dp(2f)
 
     override fun onDraw(canvas: Canvas) {
         val t = settings.theme
@@ -124,6 +133,7 @@ class ToolbarView(context: Context) : View(context) {
         } else {
             items.forEachIndexed { i, (action, res) -> drawToolIcon(canvas, i, action, res, cy) }
         }
+        drawTestSticker(canvas, cy)
         // Same look as the keys (see-through on see-through themes), like Gboard.
         paint.color = ThemeRender.withAlpha(t.keyColor, if (t.keyOpacity < 0.5f) min(t.keyOpacity * 1.4f, 0.5f) else t.keyOpacity)
         canvas.drawCircle(micCx, cy, micR, paint)
@@ -132,6 +142,35 @@ class ToolbarView(context: Context) : View(context) {
             canvas.drawCircle(micCx, cy, micR, paint)
         }
         drawIcon(canvas, R.drawable.ic_mic, micCx, cy, dp(24f), t.textColor)
+    }
+
+    private fun drawTestSticker(canvas: Canvas, cy: Float) {
+        val t = settings.theme
+        paint.color = ThemeRender.withAlpha(t.keyColor, t.keyOpacity)
+        canvas.drawCircle(stickerCx, cy, micR, paint)
+        if (pressed == Action.TEST_STICKER) {
+            paint.color = ThemeRender.withAlpha(t.textColor, 0.15f)
+            canvas.drawCircle(stickerCx, cy, micR, paint)
+        }
+        drawIcon(canvas, R.drawable.ic_sticker, stickerCx, cy - dp(5f), dp(20f), t.textColor)
+        text.typeface = Fonts.medium(context)
+        text.textSize = dp(11f)
+        text.color = t.textColor
+        canvas.drawText("Test", stickerCx, cy + dp(17f), text)
+    }
+
+    override fun onInitializeAccessibilityNodeInfo(info: AccessibilityNodeInfo) {
+        super.onInitializeAccessibilityNodeInfo(info)
+        info.className = javaClass.name
+        if (voiceStatus == null) info.addAction(AccessibilityNodeInfo.AccessibilityAction(R.id.action_send_test_sticker, "Send test sticker"))
+    }
+
+    override fun performAccessibilityAction(action: Int, arguments: Bundle?): Boolean {
+        if (action == R.id.action_send_test_sticker && voiceStatus == null) {
+            listener?.onToolbar(Action.TEST_STICKER)
+            return true
+        }
+        return super.performAccessibilityAction(action, arguments)
     }
 
     private fun drawVoiceStatus(canvas: Canvas, status: String, cy: Float) {
@@ -242,6 +281,7 @@ class ToolbarView(context: Context) : View(context) {
     private fun actionAt(x: Float): Action? {
         if (x > micCx - micR - dp(6f)) return Action.MIC
         if (voiceStatus != null) return if (x < slotsLeft) Action.MENU else Action.MIC  // tap the bar to stop
+        if (x > toolsRight) return Action.TEST_STICKER
         if (showingSuggestions) return if (x < slotsLeft) Action.MENU else null
         val i = (x / step).toInt()
         return items.getOrNull(i)?.first

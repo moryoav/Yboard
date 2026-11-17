@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.0
+
+- Added a bundled transparent WebP sticker and a Test button beside the keyboard microphone.
+- Added direct image handoff with temporary read permission and clear feedback for unsupported or rejecting apps.
+- Kept the test button available while suggestions are showing and added an accessibility action.
+
 ## 1.5.0
 
 - Preserved unfinished dictation across slow responses and live connection failures, with ordered recorded-phrase recovery.

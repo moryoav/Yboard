@@ -1,5 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
         <activity android:name="com.yboard.keyboard.test.EditorProbeActivity" android:exported="true" />
+        <activity android:name="com.yboard.keyboard.test.StickerProbeActivity" android:exported="true" />
     </application>
 </manifest>

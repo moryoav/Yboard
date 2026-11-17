@@ -34,6 +34,14 @@
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/update_paths" />
         </provider>
 
+        <provider
+            android:name=".stickers.StickerFileProvider"
+            android:authorities="${applicationId}.stickers"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/sticker_paths" />
+        </provider>
+
         <activity
             android:name=".ui.MainActivity"
             android:exported="true"
