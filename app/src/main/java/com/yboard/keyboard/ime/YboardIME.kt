@@ -62,6 +62,11 @@ import com.yboard.keyboard.ui.MainActivity
 import com.yboard.keyboard.voice.ApiKeyStore
 import com.yboard.keyboard.voice.OpenAi
 import com.yboard.keyboard.voice.VoiceTyping
+import com.yboard.keyboard.stickers.StickerShare
+import com.yboard.keyboard.stickers.StickerImages
+import com.yboard.keyboard.stickers.StickerImage
+import com.yboard.keyboard.stickers.StickerRequestGate
+import com.yboard.keyboard.keyboard.StickerPanel
 import java.util.concurrent.Executors
 import kotlin.math.abs
 
@@ -86,6 +91,12 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     // Word engine.
     private val worker = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
+    private val imageWorker = Executors.newSingleThreadExecutor()
+    private var stickerGate: StickerRequestGate? = null
+    private var stickerCall: okhttp3.Call? = null
+    private var stickerPanel: StickerPanel? = null
+    private var stickerImage: StickerImage? = null
+    private var stickerSource = ""
     private val dictionaries = HashMap<String, Dictionary?>()
     private val loading = HashSet<String>()
     private var suggester: Suggester? = null
@@ -193,6 +204,8 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     }
 
     override fun onDestroy() {
+        closeSticker()
+        imageWorker.shutdownNow()
         endVoice()
         cancelAiPredictions()
         if (Build.VERSION.SDK_INT >= 31) {
@@ -287,6 +300,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
 
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) {
         super.onStartInputView(info, restarting)
+        closeSticker()
         cancelAiPredictions()
         endVoice()
         sprinkle = null
@@ -325,6 +339,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
+        closeSticker()
         endVoice()
         cancelAiPredictions()
         root?.keyboard?.cancelAllPointers()
@@ -332,6 +347,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     }
 
     override fun onFinishInput() {
+        closeSticker()
         endVoice()
         super.onFinishInput()
         cancelAiPredictions()
@@ -1098,12 +1114,14 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
 
     override fun onToolbar(action: ToolbarView.Action) {
         val r = root ?: return
+        if (action != ToolbarView.Action.STICKER) closeSticker()
         if (action == ToolbarView.Action.MIC) {
             toggleVoice()
             return
         }
         endVoice()
         if (r.toolbar.active == action) {
+            if (action == ToolbarView.Action.STICKER) closeSticker()
             r.closePanel()
             return
         }
@@ -1117,7 +1135,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
             ToolbarView.Action.THEMES -> openThemes()
             ToolbarView.Action.EDIT -> openEditing()
             ToolbarView.Action.SPRINKLE -> { r.closePanel(); sprinkleEmojis() }
-            ToolbarView.Action.TEST_STICKER -> { r.closePanel(); sendTestSticker() }
+            ToolbarView.Action.STICKER -> openSticker()
             ToolbarView.Action.ONE_HANDED -> {
                 r.closePanel()
                 Prefs.update { it.copy(oneHanded = if (it.oneHanded == OneHanded.OFF) OneHanded.RIGHT else OneHanded.OFF) }
@@ -1134,15 +1152,96 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         requestHideSelf(0)
     }
 
-    private fun sendTestSticker() {
-        val result = com.yboard.keyboard.stickers.TestSticker.send(this, currentInputConnection, editorInfo)
-        val message = when (result) {
-            com.yboard.keyboard.stickers.TestSticker.Result.ACCEPTED -> "The app accepted the test sticker."
-            com.yboard.keyboard.stickers.TestSticker.Result.UNSUPPORTED -> "This app doesn't accept WebP stickers from keyboards."
-            com.yboard.keyboard.stickers.TestSticker.Result.REJECTED -> "This app rejected the test sticker."
-            com.yboard.keyboard.stickers.TestSticker.Result.FAILED -> "Couldn't send the test sticker. Try again."
+    private fun openSticker() {
+        if (isPasswordField(editorInfo)) { toast("Stickers are off in password fields"); return }
+        val editor = editorInfo ?: return
+        if (StickerShare.mimeTypeFor(androidx.core.view.inputmethod.EditorInfoCompat.getContentMimeTypes(editor).toList()) == null) {
+            toast("This app doesn't accept WebP stickers from keyboards."); return
         }
-        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+        if (ApiKeyStore.get(this) == null) { toast("Add your OpenAI key first: Yboard → Voice typing"); return }
+        val ic = currentInputConnection ?: return
+        val source = boxTarget(ic)?.second ?: run {
+            val selected = ic.getSelectedText(0)?.toString()
+            if (!selected.isNullOrBlank()) selected else {
+                val before = ic.getTextBeforeCursor(1501, 0) ?: return@run ""
+                val after = ic.getTextAfterCursor(1501, 0) ?: ""
+                before.toString() + after
+            }
+        }
+        if (source.isBlank()) { toast("Type a message first, then tap Sticker."); return }
+        if (source.length > 1500) { toast("Select up to 1,500 characters to turn into a sticker."); return }
+        closeSticker()
+        closeEmojiSearch(reopenPanel = false)
+        stickerSource = source
+        stickerGate = StickerRequestGate()
+        val panel = StickerPanel(this, source, settings.aiModels[AiFeature.STICKER].model,
+            onClose = { closeSticker(); root?.closePanel(); updateSuggestions() },
+            onRecreate = { createSticker() }, onSend = { sendSticker() })
+        stickerPanel = panel
+        root?.showPanel(panel, ToolbarView.Action.STICKER)
+        createSticker()
+    }
+
+    private fun createSticker() {
+        val gate = stickerGate ?: return
+        val panel = stickerPanel ?: return
+        val key = ApiKeyStore.get(this) ?: return
+        val choice = settings.aiModels[AiFeature.STICKER]
+        val token = gate.next()
+        stickerCall?.cancel()
+        val call = StickerImages.call(key, stickerSource, choice)
+        stickerCall = call
+        panel.loading(choice.model)
+        imageWorker.execute {
+            val result = runCatching { StickerImages.execute(this, call, choice) }
+            main.post {
+                if (stickerGate !== gate || !gate.accepts(token)) {
+                    result.getOrNull()?.let { it.bitmap.recycle(); it.file.delete() }
+                    return@post
+                }
+                stickerCall = null
+                result.onSuccess { image ->
+                    val previous = stickerImage
+                    stickerImage = image
+                    panel.show(image)
+                    previous?.let { it.bitmap.recycle(); it.file.delete() }
+                }.onFailure { error ->
+                    panel.error(StickerImages.friendly(error))
+                    com.yboard.keyboard.voice.AiStatus.report(AiFeature.STICKER, "Last sticker request failed")
+                }
+            }
+        }
+    }
+
+    private fun sendSticker() {
+        if (stickerGate == null || stickerCall != null) return
+        val image = stickerImage ?: return
+        when (StickerShare.send(this, currentInputConnection, editorInfo, image.file)) {
+            StickerShare.Result.ACCEPTED -> {
+                // The receiving app may read this URI after this keyboard panel is closed.
+                stickerImage = null
+                stickerPanel?.clearPreview()
+                image.bitmap.recycle()
+                closeSticker()
+                root?.closePanel()
+                updateSuggestions()
+            }
+            StickerShare.Result.UNSUPPORTED -> stickerPanel?.error("This app doesn't accept WebP stickers here.")
+            StickerShare.Result.REJECTED -> stickerPanel?.error("The app rejected this sticker. You can recreate it or try sending again.")
+            StickerShare.Result.FAILED -> stickerPanel?.error("Couldn't share this sticker. Try sending it again.")
+        }
+    }
+
+    private fun closeSticker() {
+        stickerGate?.close()
+        stickerGate = null
+        stickerCall?.cancel()
+        stickerCall = null
+        stickerPanel?.clearPreview()
+        stickerPanel = null
+        stickerImage?.let { it.bitmap.recycle(); it.file.delete() }
+        stickerImage = null
+        stickerSource = ""
     }
 
     // ------------------------------------------------------ ✨ emoji sprinkle

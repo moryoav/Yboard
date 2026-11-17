@@ -41,10 +41,19 @@ fun AiModelsScreen(settings: YboardSettings, onBack: () -> Unit) {
             }
         }
         Section("Speech recognition") {
-            AiFeature.entries.filterNot { it.text }.forEach { feature ->
+            listOf(AiFeature.LIVE, AiFeature.FILE).forEach { feature ->
                 NavRow(R.drawable.ic_mic, feature.title,
                     "${settings.aiModels[feature].model} · No reasoning control") { editing = feature }
             }
+        }
+        Section("Image generation") {
+            val feature = AiFeature.STICKER
+            val choice = settings.aiModels[feature]
+            val planning = if (choice.model.startsWith("gpt-image-2.6") && choice.effort != "none") choice.effort else "model default"
+            NavRow(R.drawable.ic_sticker, feature.title,
+                "${choice.model} · Planning: $planning") { editing = feature }
+            HintText("Creates a transparent sticker from your message. Preview, recreate and send it from the keyboard. Image generation uses your OpenAI key and is billed separately from text.")
+            statuses[feature]?.let { HintText(it) }
         }
         HintText("Next-word predictions default to GPT-6 Luna with reasoning off. Other text models must support the Responses API and structured output. Speech models must support their transcription endpoint.")
         OutlinedButton(onClick = {
@@ -71,6 +80,8 @@ fun AiModelsScreen(settings: YboardSettings, onBack: () -> Unit) {
         var effort by remember(feature) { mutableStateOf(choice.effort) }
         var effortMenu by remember { mutableStateOf(false) }
         val noReasoning = !feature.text || model.startsWith("gpt-4")
+        val image = feature == AiFeature.STICKER
+        val imagePlanning = image && model.startsWith("gpt-image-2.6")
         AlertDialog(
             onDismissRequest = { editing = null },
             title = { Text(feature.title) },
@@ -79,8 +90,10 @@ fun AiModelsScreen(settings: YboardSettings, onBack: () -> Unit) {
                     OutlinedTextField(model, { model = it.trim() }, label = { Text("Model ID or search") },
                         singleLine = true, modifier = Modifier.fillMaxWidth(),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii, autoCorrect = false))
-                    val matches = (listOf(feature.defaultModel, choice.model) + available)
-                        .distinct().filter { it.contains(model, true) }
+                    val suggested = if (image) listOf("gpt-image-2.6-flare", "gpt-image-2.6-sunburst", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst") else emptyList()
+                    val search = if (image && (model == choice.model || model in suggested)) "" else model
+                    val matches = (listOf(feature.defaultModel, choice.model) + suggested + available.filter { !image || it.startsWith("gpt-image") })
+                        .distinct().filter { it.contains(search, true) }
                     if (matches.isNotEmpty()) LazyColumn(Modifier.heightIn(max = 160.dp)) {
                         items(matches.take(40)) { id ->
                             Text(id, Modifier.fillMaxWidth().clickable { model = id }.padding(vertical = 12.dp),
@@ -88,24 +101,28 @@ fun AiModelsScreen(settings: YboardSettings, onBack: () -> Unit) {
                         }
                     }
                     Spacer(Modifier.height(12.dp))
-                    Text("Reasoning", style = MaterialTheme.typography.labelLarge)
-                    if (noReasoning) Text(if (feature.text) "None (this model has no reasoning step)" else "Not supported for transcription")
+                    Text(if (image) "Image planning" else "Reasoning", style = MaterialTheme.typography.labelLarge)
+                    if (noReasoning && !imagePlanning) Text(if (image) "Uses the image model's default planning" else if (feature.text) "None (this model has no reasoning step)" else "Not supported for transcription")
                     else Box {
-                        OutlinedButton(onClick = { effortMenu = true }) { Text(effort.replaceFirstChar { it.uppercase() }) }
+                        val shownEffort = if (imagePlanning && effort !in listOf("low", "medium", "high", "default")) "low" else effort
+                        OutlinedButton(onClick = { effortMenu = true }) { Text(shownEffort.replaceFirstChar { it.uppercase() }) }
                         DropdownMenu(effortMenu, { effortMenu = false }) {
-                            AiModels.effortsFor(model).forEach { value ->
+                            (if (imagePlanning) listOf("low", "medium", "high", "default") else AiModels.effortsFor(model)).forEach { value ->
                                 DropdownMenuItem(text = { Text(if (value == "default") "Model default" else value.replaceFirstChar { it.uppercase() }) },
                                     onClick = { effort = value; effortMenu = false })
                             }
                         }
                     }
-                    Text("An unsupported model or reasoning level will report an API error. Yboard keeps your selection.",
+                    Text(if (image) "Use a GPT Image model. An unsupported model or planning level reports an API error; Yboard keeps your selection."
+                        else "An unsupported model or reasoning level will report an API error. Yboard keeps your selection.",
                         style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
                 }
             },
             confirmButton = {
                 TextButton(onClick = {
-                    Prefs.update { it.copy(aiModels = it.aiModels.with(feature, AiModel(model, if (noReasoning) "none" else effort))) }
+                    val selectedEffort = if (imagePlanning) effort.takeIf { it in listOf("low", "medium", "high", "default") } ?: "low"
+                        else if (noReasoning) "none" else effort
+                    Prefs.update { it.copy(aiModels = it.aiModels.with(feature, AiModel(model, selectedEffort))) }
                     editing = null
                 }, enabled = model.isNotBlank() && model.none { it.isWhitespace() }) { Text("Save") }
             },

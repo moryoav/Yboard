@@ -25,7 +25,16 @@ class KeyboardSmokeInstrumentation : Instrumentation() {
         val result = Bundle()
         try {
             val mode = args.getString("mode")
-            if (mode == "voice_regression") {
+            if (mode == "sticker_local") {
+                var text = ""
+                var failure: Throwable? = null
+                runOnMainSync { try { text = StickerLocalChecks.run(targetContext, context.assets) } catch (error: Throwable) { failure = error } }
+                failure?.let { throw it }
+                result.putString("result", text)
+            } else if (mode == "image_models") {
+                val key = ApiKeyStore.get(targetContext) ?: error("No saved API key")
+                result.putString("result", OpenAi.models(key).filter { it.startsWith("gpt-image") }.joinToString())
+            } else if (mode == "voice_regression") {
                 var passed = 0
                 var failure: Throwable? = null
                 runOnMainSync { try { passed = VoiceRegression.run(targetContext) + VoiceRegression.transport() } catch (e: Throwable) { failure = e } }

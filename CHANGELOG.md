@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.7.0
+
+- Replaced the bundled test button with AI sticker creation from typed or selected text.
+- Added an in-keyboard preview with Recreate, Send and Back controls, without changing the typed draft.
+- Added image-model selection and supported planning levels under AI models, plus image API usage and cost accounting.
+- Added transparent 512 × 512 WebP preparation, private cache sharing and cancellation when leaving an editor.
+
 ## 1.6.1
 
 - Fixed WhatsApp sticker insertion by using its advertised image/webp.wasticker content type.

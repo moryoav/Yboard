@@ -26,7 +26,7 @@ import kotlin.math.roundToInt
  */
 class ToolbarView(context: Context) : View(context) {
 
-    enum class Action { MENU, UNDO, CLIPBOARD, THEMES, EDIT, ONE_HANDED, SPRINKLE, TEST_STICKER, MIC }
+    enum class Action { MENU, UNDO, CLIPBOARD, THEMES, EDIT, ONE_HANDED, SPRINKLE, STICKER, MIC }
 
     init {
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
@@ -133,7 +133,7 @@ class ToolbarView(context: Context) : View(context) {
         } else {
             items.forEachIndexed { i, (action, res) -> drawToolIcon(canvas, i, action, res, cy) }
         }
-        drawTestSticker(canvas, cy)
+        drawSticker(canvas, cy)
         // Same look as the keys (see-through on see-through themes), like Gboard.
         paint.color = ThemeRender.withAlpha(t.keyColor, if (t.keyOpacity < 0.5f) min(t.keyOpacity * 1.4f, 0.5f) else t.keyOpacity)
         canvas.drawCircle(micCx, cy, micR, paint)
@@ -144,11 +144,11 @@ class ToolbarView(context: Context) : View(context) {
         drawIcon(canvas, R.drawable.ic_mic, micCx, cy, dp(24f), t.textColor)
     }
 
-    private fun drawTestSticker(canvas: Canvas, cy: Float) {
+    private fun drawSticker(canvas: Canvas, cy: Float) {
         val t = settings.theme
         paint.color = ThemeRender.withAlpha(t.keyColor, t.keyOpacity)
         canvas.drawCircle(stickerCx, cy, micR, paint)
-        if (pressed == Action.TEST_STICKER) {
+        if (pressed == Action.STICKER || active == Action.STICKER) {
             paint.color = ThemeRender.withAlpha(t.textColor, 0.15f)
             canvas.drawCircle(stickerCx, cy, micR, paint)
         }
@@ -156,18 +156,18 @@ class ToolbarView(context: Context) : View(context) {
         text.typeface = Fonts.medium(context)
         text.textSize = dp(11f)
         text.color = t.textColor
-        canvas.drawText("Test", stickerCx, cy + dp(17f), text)
+        canvas.drawText("Sticker", stickerCx, cy + dp(17f), text)
     }
 
     override fun onInitializeAccessibilityNodeInfo(info: AccessibilityNodeInfo) {
         super.onInitializeAccessibilityNodeInfo(info)
         info.className = javaClass.name
-        if (voiceStatus == null) info.addAction(AccessibilityNodeInfo.AccessibilityAction(R.id.action_send_test_sticker, "Send test sticker"))
+        if (voiceStatus == null) info.addAction(AccessibilityNodeInfo.AccessibilityAction(R.id.action_create_sticker, "Create sticker from message"))
     }
 
     override fun performAccessibilityAction(action: Int, arguments: Bundle?): Boolean {
-        if (action == R.id.action_send_test_sticker && voiceStatus == null) {
-            listener?.onToolbar(Action.TEST_STICKER)
+        if (action == R.id.action_create_sticker && voiceStatus == null) {
+            listener?.onToolbar(Action.STICKER)
             return true
         }
         return super.performAccessibilityAction(action, arguments)
@@ -281,7 +281,7 @@ class ToolbarView(context: Context) : View(context) {
     private fun actionAt(x: Float): Action? {
         if (x > micCx - micR - dp(6f)) return Action.MIC
         if (voiceStatus != null) return if (x < slotsLeft) Action.MENU else Action.MIC  // tap the bar to stop
-        if (x > toolsRight) return Action.TEST_STICKER
+        if (x > toolsRight) return Action.STICKER
         if (showingSuggestions) return if (x < slotsLeft) Action.MENU else null
         val i = (x / step).toInt()
         return items.getOrNull(i)?.first

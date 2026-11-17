@@ -279,7 +279,8 @@ fun VoiceScreen(settings: YboardSettings, onBack: () -> Unit) {
                 "Only the AI parts of Yboard use the internet, with your own key. While the mic is on, your voice " +
                     "goes to OpenAI to be turned into text. For commands, the text just before the cursor goes too. " +
                     "AI predictions send the text before the cursor only when they're turned on. " +
-                    "Nothing is sent while you type with the keys. OpenAI charges your account for what you use.",
+                    "Sticker creation sends your message when you tap Sticker or Recreate. " +
+                    "OpenAI charges your account for what you use.",
                 MaterialTheme.typography.bodyMedium,
                 MaterialTheme.colorScheme.onSurface,
                 Modifier.padding(horizontal = 20.dp, vertical = 12.dp),

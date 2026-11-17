@@ -39,7 +39,7 @@ A clean, customizable Android keyboard for English and Hebrew, styled after Gboa
 - Tapping a word accepts it, inserts a space and immediately offers the next word. Optional AI predictions use GPT-6 Luna with reasoning off by default, with local results available immediately and cancellation of obsolete requests.
 - AI models: choose the model and reasoning for each text feature, plus both transcription models. Load available model IDs from your own OpenAI account. Unsupported choices report an error without silently changing the selection.
 - AI usage and cost: the AI models screen shows input, output and cached token totals with USD cost estimates for today, the last 7 days and the last 30 days. A model breakdown is available. Cache-write charges and duration-billed speech are included separately.
-- Sticker compatibility test: the **Test** button immediately left of the keyboard microphone sends one bundled transparent WebP through Android's direct content handoff. It stays visible with suggestions. The receiving app decides whether it becomes a sticker or another kind of attachment. See [the fixture and generation prompt](docs/test-sticker.md).
+- AI stickers: type a message and tap **Sticker** beside the microphone, then preview, recreate or send it. Choose the image model and supported planning level in AI models. The draft is preserved. WhatsApp receives its native sticker type; other apps control how they handle the image. See [AI stickers](docs/stickers.md).
 - Slide-left-on-backspace deletes whole words.
 - Emoji search in English + Hebrew from Unicode CLDR keywords (`assets/emoji/keywords.tsv`),
   kaomoji tab (`assets/emoji/kaomoji.txt`).

@@ -14,11 +14,10 @@ import java.io.File
 
 class StickerFileProvider : FileProvider()
 
-/** A bundled fixture for testing direct keyboard-to-chat sticker delivery. No cloud requests. */
-object TestSticker {
+/** Sends an immutable, private cached sticker using the focused editor's advertised contract. */
+object StickerShare {
     const val MIME = "image/webp"
     const val WHATSAPP_MIME = "image/webp.wasticker"
-    const val ASSET = "stickers/coffee_test.webp"
     enum class Result { ACCEPTED, UNSUPPORTED, REJECTED, FAILED }
 
     /** Use the receiving editor's sticker contract when it explicitly advertises one. */
@@ -28,20 +27,13 @@ object TestSticker {
         else -> null
     }
 
-    fun uri(context: Context): Uri {
-        val directory = File(context.filesDir, "sticker_test").apply { mkdirs() }
-        val file = File(directory, "coffee_test.webp")
-        if (!file.exists()) {
-            context.assets.open(ASSET).use { source -> file.outputStream().use { source.copyTo(it) } }
-        }
-        return FileProvider.getUriForFile(context, "${context.packageName}.stickers", file)
-    }
+    fun uri(context: Context, file: File): Uri = FileProvider.getUriForFile(context, "${context.packageName}.stickers", file)
 
-    fun send(context: Context, connection: InputConnection?, editor: EditorInfo?): Result {
+    fun send(context: Context, connection: InputConnection?, editor: EditorInfo?, file: File): Result {
         if (connection == null || editor == null) return Result.UNSUPPORTED
         val mime = mimeTypeFor(EditorInfoCompat.getContentMimeTypes(editor).toList()) ?: return Result.UNSUPPORTED
         return try {
-            val content = InputContentInfoCompat(uri(context), ClipDescription("Yboard test sticker", arrayOf(mime)), null)
+            val content = InputContentInfoCompat(uri(context, file), ClipDescription("Yboard sticker", arrayOf(mime)), null)
             val accepted = InputConnectionCompat.commitContent(connection, editor, content,
                 InputConnectionCompat.INPUT_CONTENT_GRANT_READ_URI_PERMISSION, null)
             Log.i("YboardSticker", "Handoff MIME=$mime accepted=$accepted")

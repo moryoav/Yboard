@@ -8,6 +8,13 @@ object UsagePricing {
     const val SOURCE = "https://developers.openai.com/api/docs/pricing"
     private data class Rates(val input: Double, val cached: Double?, val output: Double, val cacheWrites: Boolean = false, val longContext: Boolean = false)
     private val text = mapOf(
+        // Sticker requests contain text input and generate image output (standard tier).
+        "gpt-image-2.6-flare" to Rates(5.0, 1.25, 30.0),
+        "gpt-image-2.6-sunburst" to Rates(5.0, 1.25, 30.0),
+        "gpt-image-2.5-flare" to Rates(5.0, 1.25, 30.0),
+        "gpt-image-2.5-sunburst" to Rates(5.0, 1.25, 30.0),
+        "gpt-image-2" to Rates(5.0, 1.25, 30.0),
+        "gpt-image-1.5" to Rates(5.0, 1.25, 32.0),
         "gpt-6-luna" to Rates(.10, .01, .50, true, true),
         "gpt-6.1-terra" to Rates(1.0, .05, 5.0, true, true),
         "gpt-6.1-sol" to Rates(2.0, .10, 10.0, true, true),

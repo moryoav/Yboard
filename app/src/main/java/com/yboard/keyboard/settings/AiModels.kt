@@ -9,17 +9,18 @@ enum class AiFeature(val title: String, val defaultModel: String, val text: Bool
     SPELLING("Name spellings", "gpt-6.1-terra"),
     LIVE("Live transcription", "gpt-live-transcribe", false),
     FILE("Recorded transcription fallback", "gpt-transcribe", false),
+    STICKER("Sticker images", "gpt-image-2.6-flare", false),
 }
 
 data class AiModel(val model: String, val effort: String = "none") {
     /** Non-reasoning models do not accept a reasoning parameter. */
     val reasoning: String? get() = effort.takeUnless {
-        it == "default" || model.startsWith("gpt-4") || model.contains("transcrib") || model == "whisper-1"
+        it == "default" || model.startsWith("gpt-4") || model.startsWith("gpt-image") || model.contains("transcrib") || model == "whisper-1"
     }
 }
 
 data class AiModels(val choices: Map<AiFeature, AiModel> = emptyMap()) {
-    operator fun get(feature: AiFeature): AiModel = choices[feature] ?: AiModel(feature.defaultModel)
+    operator fun get(feature: AiFeature): AiModel = choices[feature] ?: AiModel(feature.defaultModel, if (feature == AiFeature.STICKER) "low" else "none")
     fun with(feature: AiFeature, choice: AiModel) = copy(choices = choices + (feature to choice))
     fun toJson() = JSONObject().apply {
         choices.forEach { (feature, choice) ->
