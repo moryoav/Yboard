@@ -145,18 +145,7 @@ class ToolbarView(context: Context) : View(context) {
     }
 
     private fun drawSticker(canvas: Canvas, cy: Float) {
-        val t = settings.theme
-        paint.color = ThemeRender.withAlpha(t.keyColor, t.keyOpacity)
-        canvas.drawCircle(stickerCx, cy, micR, paint)
-        if (pressed == Action.STICKER || active == Action.STICKER) {
-            paint.color = ThemeRender.withAlpha(t.textColor, 0.15f)
-            canvas.drawCircle(stickerCx, cy, micR, paint)
-        }
-        drawIcon(canvas, R.drawable.ic_sticker, stickerCx, cy - dp(5f), dp(20f), t.textColor)
-        text.typeface = Fonts.medium(context)
-        text.textSize = dp(11f)
-        text.color = t.textColor
-        canvas.drawText("Sticker", stickerCx, cy + dp(17f), text)
+        drawToolIconAt(canvas, stickerCx, Action.STICKER, R.drawable.ic_sticker, cy)
     }
 
     override fun onInitializeAccessibilityNodeInfo(info: AccessibilityNodeInfo) {
@@ -196,8 +185,11 @@ class ToolbarView(context: Context) : View(context) {
     }
 
     private fun drawToolIcon(canvas: Canvas, i: Int, action: Action, res: Int, cy: Float) {
+        drawToolIconAt(canvas, step * (i + 0.5f), action, res, cy)
+    }
+
+    private fun drawToolIconAt(canvas: Canvas, cx: Float, action: Action, res: Int, cy: Float) {
         val t = settings.theme
-        val cx = step * (i + 0.5f)
         val isActive = action == active || (action == Action.ONE_HANDED && settings.oneHanded != OneHanded.OFF)
         if (isActive) {
             paint.color = ThemeRender.withAlpha(t.accentColor, 0.32f)

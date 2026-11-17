@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.1
+
+- Matched the sticker toolbar button to the emoji button with a centered icon, no text label and no permanent circle.
+
 ## 1.7.0
 
 - Replaced the bundled test button with AI sticker creation from typed or selected text.
