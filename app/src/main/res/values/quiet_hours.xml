@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Yboard.QuietHoursPicker" parent="android:Theme.Material.Light.Dialog.Alert">
+        <item name="android:colorAccent">#5B4BEB</item>
+    </style>
+</resources>

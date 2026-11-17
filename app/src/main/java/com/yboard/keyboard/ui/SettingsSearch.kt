@@ -119,6 +119,7 @@ object SettingsIndex {
         SettingEntry("Sound on keypress", Screen.SOUND, SOUND, "sound click audio צליל"),
         SettingEntry("Click sound", Screen.SOUND, SOUND, "sound style click wood typewriter צליל"),
         SettingEntry("Sound volume", Screen.SOUND, SOUND, "volume loud quiet", "Volume"),
+        SettingEntry("Quiet hours", Screen.SOUND, SOUND, "schedule night bedtime mute silence vibration quiet hours שעות שקטות", "Use quiet hours"),
         // Languages
         SettingEntry("English", Screen.LANGUAGES, "Languages", "language english אנגלית"),
         SettingEntry("Hebrew keyboard", Screen.LANGUAGES, "Languages", "language hebrew ivrit עברית", "עברית · Hebrew"),

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.7.4
+
+- Added daily quiet hours under Sound & vibration, with start and end times and separate sound and vibration controls.
+- Added overnight schedules and automatic return to the usual feedback settings when quiet hours ends.
+- Applied quiet hours to key sounds, touch vibration and sound previews without changing the usual preferences.
+
 ## 1.7.3
 
 - Disabled Android's system spell checker while Yboard is active to prevent incorrect spelling underlines on Hebrew text in apps such as WhatsApp.

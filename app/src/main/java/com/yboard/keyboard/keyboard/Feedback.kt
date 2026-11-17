@@ -7,6 +7,7 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import com.yboard.keyboard.settings.YboardSettings
+import java.time.LocalTime
 import kotlin.math.roundToInt
 
 /** Key-press vibration and click sounds. */
@@ -24,14 +25,17 @@ class Feedback(private val context: Context) {
     private val audio = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
 
     fun keyDown(type: KeyType?, s: YboardSettings, light: Boolean = false) {
-        if (s.haptics) vibrate(if (light) s.hapticStrength * 0.6f else s.hapticStrength)
-        if (s.sound && !light) click(type, s)
+        val now = LocalTime.now()
+        if (s.haptics && !s.quietHours.suppressesVibrationAt(now)) {
+            vibrate(if (light) s.hapticStrength * 0.6f else s.hapticStrength)
+        }
+        if (s.sound && !light) click(type, s, now)
     }
 
     /** Plays one click in the chosen style (used for the settings preview too). */
     fun preview(s: YboardSettings) = click(KeyType.CHAR, s)
 
-    fun vibrate(strength: Float) {
+    private fun vibrate(strength: Float) {
         val v = vibrator ?: return
         if (!v.hasVibrator()) return
         val st = strength.coerceIn(0.05f, 1f)
@@ -46,7 +50,8 @@ class Feedback(private val context: Context) {
         }
     }
 
-    private fun click(type: KeyType?, s: YboardSettings) {
+    private fun click(type: KeyType?, s: YboardSettings, now: LocalTime = LocalTime.now()) {
+        if (s.quietHours.suppressesSoundAt(now)) return
         val am = audio ?: return
         if (am.ringerMode != AudioManager.RINGER_MODE_NORMAL) return
         val volume = s.soundVolume

@@ -20,6 +20,7 @@ A clean, customizable Android keyboard for English and Hebrew, styled after Gboa
   text editing (arrows, select, copy/paste, undo); one-handed mode is in the app under Layout & size
 - Long-press: accents (é ñ…), numbers, punctuation; comma → emoji
 - Space-bar slide moves the cursor, vibration & sound with strength/volume
+- Quiet hours: under Sound & vibration, set a daily start and end time and pause key sounds, vibration, or both. Overnight schedules are supported; matching times mean all day. Usual settings resume afterward.
 - Local typing and swipe decoding work offline. Optional AI predictions, voice typing, name spellings and emoji sprinkle use your OpenAI key.
 - Font: Google Sans (what Gboard uses), bundled under the SIL Open Font License, trimmed to
   Latin + Hebrew (`res/font/`, license in `assets/licenses/`)

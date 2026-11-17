@@ -144,6 +144,7 @@ data class YboardSettings(
     val hapticStrength: Float = 0.45f,
     val sound: Boolean = false,
     val soundVolume: Float = 0.5f,
+    val quietHours: QuietHours = QuietHours(),
     val autoCaps: Boolean = true,
     val doubleSpacePeriod: Boolean = true,
     val spaceCursor: Boolean = true,
@@ -244,6 +245,7 @@ data class YboardSettings(
         put("oneHanded", oneHanded.name); put("bottomOffset", bottomOffset.toDouble())
         put("haptics", haptics); put("hapticStrength", hapticStrength.toDouble())
         put("sound", sound); put("soundVolume", soundVolume.toDouble())
+        put("quietHours", quietHours.toJson())
         put("autoCaps", autoCaps); put("doubleSpacePeriod", doubleSpacePeriod)
         put("spaceCursor", spaceCursor); put("longPressDelay", longPressDelay)
         put("english", english); put("hebrew", hebrew); put("language", language)
@@ -295,6 +297,7 @@ data class YboardSettings(
                     hapticStrength = f("hapticStrength", d.hapticStrength),
                     sound = o.optBoolean("sound", d.sound),
                     soundVolume = f("soundVolume", d.soundVolume),
+                    quietHours = QuietHours.fromJson(o.optJSONObject("quietHours")),
                     autoCaps = o.optBoolean("autoCaps", d.autoCaps),
                     doubleSpacePeriod = o.optBoolean("doubleSpacePeriod", d.doubleSpacePeriod),
                     spaceCursor = o.optBoolean("spaceCursor", d.spaceCursor),

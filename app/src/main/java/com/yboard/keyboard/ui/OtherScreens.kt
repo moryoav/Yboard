@@ -208,6 +208,7 @@ fun SoundScreen(settings: YboardSettings, onBack: () -> Unit) {
             }
             HintText("Tap a sound to hear it. Key sounds follow your phone's ringer: they're quiet on silent or vibrate.")
         }
+        QuietHoursSection(settings)
     }
 }
 
