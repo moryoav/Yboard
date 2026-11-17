@@ -1,0 +1,43 @@
+# Local Android/Gradle state and generated build output.
+.gradle/
+.kotlin/
+**/build/
+local.properties
+.idea/
+*.iml
+.cxx/
+.externalNativeBuild/
+
+# Keep device captures, logs, and investigation artifacts outside the project.
+/artifacts/
+/captures/
+*.hprof
+
+# Never commit signing keys or local credentials.
+*.jks
+*.keystore
+*.key
+*.pem
+*.p12
+*.pfx
+.env
+.env.*
+**/secrets/
+**/credentials.json
+**/token.json
+
+# Local agent instructions and machine-specific agent state stay private.
+[Aa][Gg][Ee][Nn][Tt][Ss].[Mm][Dd]
+.agents/
+.codex/
+
+# Distribute APKs through GitHub Releases, never through source history.
+*.apk
+*.aab
+*.apks
+*.idsig
+*.log
+*.db
+*.sqlite
+*.sqlite3
+*.zip

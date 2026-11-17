@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The OpenAI key never leaves the phone in backups or phone-to-phone transfers. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="yboard_secret.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="yboard_secret.xml" />
+    </device-transfer>
+</data-extraction-rules>

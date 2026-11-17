@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Yboard registers as ONE keyboard with no Android "subtypes". English / Hebrew switching
+  happens inside Yboard (the globe key), so Android's own switch-keyboard button never
+  cycles through "Yboard English", "Yboard Hebrew" and then other keyboard apps.
+-->
+<!-- supportsInlineSuggestions: logins and codes from the autofill service show in Yboard's strip. -->
+<input-method xmlns:android="http://schemas.android.com/apk/res/android"
+    android:settingsActivity="com.yboard.keyboard.ui.MainActivity"
+    android:supportsInlineSuggestions="true" />
