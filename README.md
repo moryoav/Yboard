@@ -2,7 +2,9 @@
 
 A clean, customizable Android keyboard for English and Hebrew, styled after Gboard.
 
-**Install:** copy `Yboard.apk` to your phone, open it, allow "install unknown apps", then open Yboard and follow the two setup steps.
+**Install:** download the APK from [GitHub Releases](https://github.com/moryoav/Yboard/releases/latest), open it, allow installation when Android asks, then open Yboard and follow the setup steps.
+
+**Updates:** open Yboard → About → Check for updates. When a newer release is available, tap Download and install. Android asks you to allow updates from Yboard the first time and confirm each installation. Settings, learned words and the saved OpenAI key are retained. Wireless debugging is not needed.
 
 ## What's in it
 - English (QWERTY) and Hebrew layouts, symbols, number pad; 🌐 switches language
@@ -67,3 +69,20 @@ gradle :app:recordPaparazziDebug     # screenshots -> app/src/test/snapshots/ima
 ```
 
 For updates on the owner's phone, set `yboard.signingStore` in the ignored `local.properties` to the original computer's debug keystore. Both build types use it. Keep the keystore outside the project and preserve a backup; a different key cannot update the installed app while retaining its data.
+
+## Publish a release
+
+1. Synchronize `main` with `origin/main` before starting work. Commit and push completed changes.
+2. Set the release name and a larger Android version code in `version.properties`. Version codes are fixed per release and must always increase.
+3. Keep the original signing key outside the checkout, configure it locally, and set `JAVA_HOME` (JDK 17) and `ANDROID_HOME`.
+4. Write release notes to a file, then run PowerShell 7:
+
+```powershell
+./scripts/Publish-Release.ps1 -NotesFile /path/to/release-notes.md
+```
+
+The script runs the logic tests, builds the release APK, checks the original signing certificate, confirms local and remote source agree, and publishes a tag, APK and `update.json` to GitHub Releases. Names containing a suffix such as `-rc.1` become prereleases and are not offered by the app. `-SkipBuild` can publish an already tested APK after verifying its version and signature.
+
+Every distributed APK belongs in a GitHub Release. APKs, local agent instructions, local settings, credentials and signing files are excluded from source history. The GitHub test workflow runs without signing keys or API keys. Publishing from another trusted machine requires the original signing key; the repository does not store or transfer it.
+
+The app checks stable public releases without GitHub credentials, compares Android version codes, verifies the APK checksum, package, version and signing certificate, and hands installation to Android. Update checks send no keyboard text, typing history or OpenAI key.

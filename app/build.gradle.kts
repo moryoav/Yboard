@@ -1,11 +1,9 @@
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
-import java.util.Locale
 import java.util.Properties
 
 val localConfig = Properties().apply {
     rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
 }
+val appVersion = Properties().apply { rootProject.file("version.properties").inputStream().use { load(it) } }
 
 plugins {
     id("com.android.application")
@@ -35,10 +33,8 @@ android {
         minSdk = 26
         targetSdk = 35
         testInstrumentationRunner = "com.yboard.keyboard.KeyboardSmokeInstrumentation"
-        // Every build gets a bigger number (minutes since 2026) and its date and time, so a new APK
-        // is clearly newer when you install it.
-        versionCode = ((System.currentTimeMillis() / 60_000L) - 29_453_760L).toInt()
-        versionName = "1.2 (" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("d MMM, HH:mm", Locale.ENGLISH)) + ")"
+        versionCode = appVersion.getProperty("versionCode").toInt()
+        versionName = appVersion.getProperty("versionName")
     }
 
     buildTypes {

@@ -242,12 +242,13 @@ fun AboutScreen(onBack: () -> Unit) {
             Text("Yboard", style = MaterialTheme.typography.headlineMedium)
             Text("Version $version", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+        UpdatesSection()
         Section("Privacy") {
             Text(
                 "Everything you type with the keys, your clipboard history, learned words and themes stay on this phone. " +
-                    "Only the AI features use the internet, with your own OpenAI key: voice typing (while the mic is on, " +
+                    "The AI features use the internet, with your own OpenAI key: voice typing (while the mic is on, " +
                     "your voice and, for commands, the text just before the cursor), AI predictions if you turn them on, " +
-                    "and the ✨ emoji sprinkle when you tap it.",
+                    "and the ✨ emoji sprinkle when you tap it. Update checks contact GitHub without sending keyboard text or your OpenAI key.",
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
             )

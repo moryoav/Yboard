@@ -5,6 +5,7 @@
     <!-- AI voice typing only: the microphone, and the internet to reach OpenAI. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!-- Lets the app see the phone's other keyboards (Gboard...), so it can tell you which to turn off. -->
     <queries>
@@ -24,6 +25,14 @@
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.Yboard">
+
+        <provider
+            android:name=".update.UpdateFileProvider"
+            android:authorities="${applicationId}.updates"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/update_paths" />
+        </provider>
 
         <activity
             android:name=".ui.MainActivity"

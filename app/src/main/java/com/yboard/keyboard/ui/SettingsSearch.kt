@@ -130,6 +130,7 @@ object SettingsIndex {
         SettingEntry("How to use voice typing", Screen.VOICE, VOICE, "voice talk dictate help קול", "How to use it"),
         // About
         SettingEntry("About Yboard", Screen.ABOUT, "About", "version privacy credits", null),
+        SettingEntry("Check for updates", Screen.ABOUT, "About › Updates", "update upgrade apk github release install version", "Updates"),
     )
 
     /** Settings matching [query]: every word must appear in the name, place or keywords. Best first. */
