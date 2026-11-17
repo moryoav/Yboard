@@ -24,6 +24,10 @@ public class EditorProbeActivity extends Activity {
         editor.setInputType(getIntent().getIntExtra("inputType", 1));
         editor.setImeOptions(getIntent().getIntExtra("imeOptions", 0));
         editor.setHint("Synthetic test text only");
+        String initial = getIntent().getStringExtra("text");
+        String encoded = getIntent().getStringExtra("text64");
+        if (encoded != null) initial = new String(android.util.Base64.decode(encoded, android.util.Base64.DEFAULT), java.nio.charset.StandardCharsets.UTF_8);
+        if (initial != null) { editor.setText(initial); editor.setSelection(initial.length()); }
         column.addView(editor, new LinearLayout.LayoutParams(-1, 240));
         setContentView(column);
         editor.requestFocus();

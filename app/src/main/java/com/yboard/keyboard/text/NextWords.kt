@@ -6,12 +6,13 @@ import android.os.Handler
 import android.os.Looper
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlin.math.ln
 
 /**
- * Next-word predictions: which word usually comes after which. Starts with common pairs
- * ("thank" -> "you", "בוקר" -> "טוב") and learns yours as you type. Stored only on the phone.
+ * Sentence-aware next words with up to four preceding words, common phrases and personal habits.
+ * The existing word-pair store remains readable; longer contexts use the same bounded format.
  */
-class NextWords private constructor(private val sp: SharedPreferences?, private val language: String) {
+class NextWords private constructor(private val sp: SharedPreferences?, private val language: String, raw: String? = sp?.getString(language, null)) {
 
     // previous word (normalized, or START for a new sentence) -> next word spelling -> count
     private val pairs = LinkedHashMap<String, LinkedHashMap<String, Int>>(64, 0.75f, true)
@@ -20,14 +21,18 @@ class NextWords private constructor(private val sp: SharedPreferences?, private 
 
     init {
         try {
-            val raw = sp?.getString(language, null)
             if (raw != null) {
                 val o = JSONObject(raw)
                 o.keys().forEach { prev ->
+                    if (pairs.size >= MAX_PREV) return@forEach
                     val arr = o.optJSONArray(prev) ?: return@forEach
                     val m = LinkedHashMap<String, Int>()
-                    for (i in 0 until arr.length() step 2) m[arr.getString(i)] = arr.getInt(i + 1)
-                    pairs[prev] = m
+                    for (i in 0 until arr.length() - 1 step 2) {
+                        val word = clean(arr.optString(i)) ?: continue
+                        m[word] = arr.optInt(i + 1).coerceIn(1, 999)
+                        if (m.size >= MAX_NEXT) break
+                    }
+                    if (prev.length <= 130 && prev.split(' ').size <= PredictionContext.ORDER) pairs[prev] = m
                 }
             }
         } catch (_: Exception) {
@@ -38,6 +43,17 @@ class NextWords private constructor(private val sp: SharedPreferences?, private 
     fun learn(prev: String?, next: String) {
         val word = clean(next) ?: return
         val key = prev?.let { clean(it)?.let(Dictionary::normalize) } ?: START
+        learnKey(key, word)
+        scheduleSave()
+    }
+
+    fun learnContext(before: String, next: String) {
+        val word = clean(next) ?: return
+        PredictionContext.keys(before).forEach { learnKey(it, word) }
+        scheduleSave()
+    }
+
+    private fun learnKey(key: String, word: String) {
         val m = pairs.getOrPut(key) { LinkedHashMap() }
         // Keep the spelling the person uses ("I", names), counted case-insensitively.
         val existing = m.keys.firstOrNull { it.equals(word, ignoreCase = true) }
@@ -46,17 +62,16 @@ class NextWords private constructor(private val sp: SharedPreferences?, private 
         m[spelling] = count.coerceAtMost(999)
         if (m.size > MAX_NEXT) m.entries.minByOrNull { it.value }?.let { m.remove(it.key) }
         if (pairs.size > MAX_PREV) pairs.keys.firstOrNull()?.let { pairs.remove(it) }  // least recently used
-        scheduleSave()
     }
 
     /** Learns every word pair in a piece of text (for example a voice-typed phrase). */
     fun learnText(text: String, before: String = "") {
-        var prev: String? = lastWordOf(before)
-        val tokens = Regex("[\\p{L}\\p{M}'’]+|[.!?\\n]").findAll(text).map { it.value }.toList()
+        var context = before
+        val tokens = Regex("[\\p{L}\\p{M}]+(?:['’׳״][\\p{L}\\p{M}]+)*|[.!?。！？\\n\\r:;]").findAll(text).map { it.value }.toList()
         for (t in tokens) {
-            if (t.length == 1 && t[0] in ".!?\n") { prev = null; continue }
-            learn(prev, t)
-            prev = t
+            if (t.length == 1 && !t[0].isLetter()) { context = ""; continue }
+            learnContext(context, t)
+            context = (context.trimEnd() + " " + t + " ").takeLast(PredictionContext.MAX_BEFORE)
         }
     }
 
@@ -65,29 +80,49 @@ class NextWords private constructor(private val sp: SharedPreferences?, private 
      * your own habits first, then common pairs, then very common words.
      */
     fun predict(prev: String?, sentenceStart: Boolean, limit: Int = 3): List<String> {
-        val key = if (sentenceStart || prev == null) START else Dictionary.normalize(prev)
+        return predictContext(if (sentenceStart || prev == null) "" else "$prev ", limit = limit)
+    }
+
+    /** Contextual completions share ranking with next words; personal data is optional per field. */
+    fun predictContext(before: String, prefix: String = "", limit: Int = 3, model: PhraseModel? = null, personalized: Boolean = true): List<String> {
+        val keys = PredictionContext.keys(before)
+        val key = keys.first()
+        val prev = PredictionContext.words(before).lastOrNull()
         val scores = LinkedHashMap<String, Double>()
         fun add(w: String, score: Double) {
             val k = scores.keys.firstOrNull { it.equals(w, ignoreCase = true) }
             if (k == null) scores[w] = score else scores[k] = maxOf(scores.getValue(k), score)
         }
-        pairs[key]?.forEach { (w, c) -> add(w, 3.0 + c * 2.0) }
+        for (context in keys) {
+            val specificity = if (context == START) 0 else context.count { it == ' ' }
+            if (personalized) pairs[context]?.forEach { (w, c) -> add(w, 1.5 + specificity * 3.0 + 3.0 * ln(c.coerceAtMost(12) + 1.0)) }
+            model?.candidates(context)?.forEach { (w, score) -> add(w, score) }
+        }
         seeds(language)[key]?.forEachIndexed { i, w -> add(w, 4.0 - i * 0.5) }
         val fallback = if (key == START) starts(language) else common(language)
         fallback.forEachIndexed { i, w -> add(w, 0.5 - i * 0.1) }
         val out = scores.entries.sortedByDescending { it.value }.map { it.key }
-            .filterNot { prev != null && it.equals(prev, ignoreCase = true) }
+            .filter { it.startsWith(prefix, true) && !it.equals(prefix, true) }
+            .filterNot { prefix.isEmpty() && prev != null && it.equals(prev, ignoreCase = true) }
             .take(limit)
-        return if (key == START && language == "en") out.map { it.replaceFirstChar { c -> c.uppercaseChar() } } else out
+        return if (prefix.isNotEmpty()) out.map { Suggester.applyCase(prefix, it) }
+        else if (key == START && language == "en") out.map { it.replaceFirstChar { c -> c.uppercaseChar() } } else out
     }
 
     /** Your most-used word pairs, like "love you" (for AI predictions in your style). */
     fun topPairs(n: Int): List<String> = pairs.entries
+        .filter { !it.key.contains(' ') }
         .flatMap { (prev, m) -> m.map { (w, c) -> Triple(prev, w, c) } }
         .filter { it.third >= 2 }
         .sortedByDescending { it.third }
         .take(n)
         .map { (prev, w, _) -> if (prev == START) "(start) $w" else "$prev $w" }
+
+    /** Only repeated habits relevant to this sentence are included in the small AI prompt. */
+    fun hints(before: String, n: Int): List<String> = PredictionContext.keys(before).asReversed().flatMap { key ->
+        pairs[key].orEmpty().entries.filter { it.value >= 2 }.sortedByDescending { it.value }
+            .map { if (key == START) "(start) ${it.key}" else "$key ${it.key}" }
+    }.distinct().take(n)
 
     fun clear() {
         pairs.clear()
@@ -99,15 +134,13 @@ class NextWords private constructor(private val sp: SharedPreferences?, private 
         savePending = true
         handler.postDelayed({
             savePending = false
-            val o = JSONObject()
-            pairs.forEach { (prev, m) ->
-                val arr = JSONArray()
-                m.forEach { (w, c) -> arr.put(w).put(c) }
-                o.put(prev, arr)
-            }
-            sp.edit().putString(language, o.toString()).apply()
+            sp.edit().putString(language, snapshot()).apply()
         }, 3000L)
     }
+
+    internal fun snapshot(): String = JSONObject().apply {
+        pairs.forEach { (prev, words) -> put(prev, JSONArray().apply { words.forEach { (word, count) -> put(word).put(count) } }) }
+    }.toString()
 
     companion object {
         const val START = "^"
@@ -139,6 +172,8 @@ class NextWords private constructor(private val sp: SharedPreferences?, private 
 
         /** In-memory only (tests). */
         fun inMemory(language: String) = NextWords(null, language)
+
+        internal fun fromSnapshot(language: String, raw: String) = NextWords(null, language, raw)
 
         fun clearAll(context: Context) {
             synchronized(cache) { cache.values.forEach { it.clear() } }

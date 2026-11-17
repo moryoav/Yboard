@@ -25,7 +25,14 @@ class KeyboardSmokeInstrumentation : Instrumentation() {
         val result = Bundle()
         try {
             val mode = args.getString("mode")
-            if (mode == "sticker_local") {
+            if (mode == "prediction_ime") {
+                result.putString("result", PredictionImeChecks(this).run())
+            } else if (mode == "prediction_local") {
+                result.putString("result", PredictionChecks.local(targetContext) + "; " + PredictionChecks.persistence(this))
+            } else if (mode == "prediction_benchmark") {
+                val models = args.getString("models", "gpt-6-luna,gpt-6.1-terra").split(',').filter { it.isNotBlank() }
+                result.putString("result", PredictionChecks.cloud(targetContext, models, args.getString("repeats", "2").toInt()))
+            } else if (mode == "sticker_local") {
                 var text = ""
                 var failure: Throwable? = null
                 runOnMainSync { try { text = StickerLocalChecks.run(targetContext, context.assets) } catch (error: Throwable) { failure = error } }

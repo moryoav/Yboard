@@ -29,6 +29,10 @@ class Suggester(
     )
 
     private val positions: Map<Char, Pair<Float, Float>> = keyPositions(language)
+    private var cachedRevision = -1L
+    private val recent = object : LinkedHashMap<Pair<String, Int>, Result>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Pair<String, Int>, Result>?) = size > 8
+    }
 
     fun isKnown(word: String): Boolean {
         val norm = Dictionary.normalize(word)
@@ -36,6 +40,11 @@ class Suggester(
     }
 
     fun suggest(typed: String, limit: Int = 3): Result {
+        if (cachedRevision != user.cacheRevision) { recent.clear(); cachedRevision = user.cacheRevision }
+        return recent.getOrPut(typed to limit) { compute(typed, limit) }
+    }
+
+    private fun compute(typed: String, limit: Int): Result {
         val norm = Dictionary.normalize(typed)
         val known = isKnown(typed)
         if (norm.isEmpty() || dict == null) return Result(typed, known, emptyList(), null)

@@ -1,0 +1,434 @@
+# Original Yboard conversational examples. One sentence per line, most common examples first.
+# Used to build a bounded 1-4 word context index at load time. No user text is included.
+I am on my way home.
+I am at home now.
+I work at the office.
+I work at a school.
+I work from home today.
+I am at work right now.
+I will be there soon.
+I will call you later.
+I will let you know.
+I will see you tomorrow.
+I would like to order food.
+I would like to book a table.
+I would like to ask a question.
+I would like to thank you.
+I need to go home.
+I need to finish this first.
+I need to get some sleep.
+I need to talk to you.
+I want to see you.
+I want to go out tonight.
+I want to make sure everything is ready.
+I have a question for you.
+I have to leave now.
+I have been thinking about it.
+I have already sent it.
+I have just finished work.
+I think we should go.
+I think it is a good idea.
+I think you are right.
+I don't know yet.
+I don't think so.
+I don't have time right now.
+I don't want to be late.
+I don't understand what you mean.
+I can't wait to see you.
+I can't make it today.
+I can't find my phone.
+I can help you with that.
+I can pick you up.
+I can do it tomorrow.
+I hope you are doing well.
+I hope everything is going well.
+I hope to see you soon.
+I love you so much.
+I love spending time with you.
+I miss you too.
+I feel much better now.
+I feel like going for a walk.
+I just wanted to say thanks.
+I just got home.
+I just saw your message.
+I forgot to tell you.
+I remember what you said.
+I understand what you mean.
+I appreciate your help.
+I agree with you.
+I prefer the first one.
+I should be there in a few minutes.
+I was going to ask you.
+I was wondering if you are free.
+I was at the supermarket.
+I was just about to leave.
+I'm on my way.
+I'm going to be late.
+I'm going to the store.
+I'm going to bed now.
+I'm not sure yet.
+I'm sorry about that.
+I'm sorry for the late reply.
+I'm happy to help.
+I'm looking forward to seeing you.
+I'm waiting for you outside.
+I'm ready when you are.
+I'm working from home today.
+I'm in a meeting right now.
+I'm running a little late.
+I'm feeling much better.
+I'll be there soon.
+I'll call you later.
+I'll send it to you.
+I'll let you know tomorrow.
+I'll check and get back to you.
+I'll pick you up at the station.
+I'll take care of it.
+I'll see what I can do.
+I'll be back in a minute.
+I'll try again later.
+You are welcome.
+You are absolutely right.
+You can call me anytime.
+You can send it to me.
+You should get some rest.
+You don't have to worry.
+You look great today.
+You have a good point.
+You're the best.
+You're welcome to join us.
+We are on our way.
+We are going to be late.
+We are waiting for you.
+We are having dinner now.
+We should meet up soon.
+We should talk about it.
+We can do it together.
+We can meet at the station.
+We need to leave soon.
+We need to make a decision.
+We will be there at eight.
+We will figure it out.
+We have a reservation for tonight.
+We're almost there.
+We're going out for dinner.
+They are on their way.
+They will call you back.
+It is a good idea.
+It is not a problem.
+It is going to rain.
+It was nice to see you.
+It was great meeting you.
+It looks good to me.
+It sounds like a plan.
+It works for me.
+It depends on the weather.
+It doesn't matter.
+It's all good.
+It's okay to ask for help.
+It's been a long day.
+It's nice to hear from you.
+It's time to go.
+It's up to you.
+It's really good to see you.
+It's not what I meant.
+That's a good idea.
+That's exactly what I was thinking.
+That's great news.
+That's fine with me.
+That's what I thought.
+That's so nice of you.
+That sounds good to me.
+That makes sense.
+That would be great.
+This is what I mean.
+This is really helpful.
+This looks amazing.
+This weekend works for me.
+There is no rush.
+There are a few things to do.
+There you go.
+Here is the address.
+Here is what I found.
+How are you doing?
+How was your day?
+How was your weekend?
+How did it go?
+How does that sound?
+How much does it cost?
+How long will it take?
+How about tomorrow morning?
+How about we meet for coffee?
+What are you doing?
+What are you up to?
+What do you think?
+What do you want to eat?
+What did you mean?
+What time are we meeting?
+What time does it start?
+What happened to your phone?
+What is the address?
+What's the plan for tonight?
+What's your favorite movie?
+What's going on?
+Where are you now?
+Where do you want to meet?
+Where should I park?
+Where did you put it?
+Where is the nearest station?
+When are you coming home?
+When will you be here?
+When do you want to go?
+When does the meeting start?
+When can I call you?
+Why don't we try again?
+Why did you say that?
+Who is coming with us?
+Who do I need to contact?
+Which one do you prefer?
+Which day works best for you?
+Are you on your way?
+Are you free tonight?
+Are you still at work?
+Are you coming with us?
+Are you ready to go?
+Are we still meeting tomorrow?
+Do you want to come over?
+Do you want to grab coffee?
+Do you want anything from the store?
+Do you have a minute?
+Do you know the address?
+Do you remember where we parked?
+Do you need any help?
+Did you get my message?
+Did you have a good day?
+Did you see what happened?
+Did you make it home?
+Can you send me the address?
+Can you send me a picture?
+Can you give me a call?
+Can you help me with this?
+Can you pick me up?
+Can you check if it's ready?
+Can we talk later?
+Can we meet tomorrow?
+Could you please send it again?
+Could you let me know when you're ready?
+Would you like to join us?
+Would you mind checking it?
+Is there anything else you need?
+Is it okay if I call you?
+Is that still the plan?
+Let me know when you get home.
+Let me know what you think.
+Let me know if you need anything.
+Let me check and get back to you.
+Let me see what I can do.
+Let's go for a walk.
+Let's get something to eat.
+Let's meet at the entrance.
+Let's talk about it tomorrow.
+Let's try a different time.
+Let's do it together.
+Thank you so much.
+Thank you for your help.
+Thank you for letting me know.
+Thank you for a lovely evening.
+Thanks for the update.
+Thanks for getting back to me.
+Thanks for checking.
+Thanks for everything.
+Thanks a lot.
+Thanks again for your help.
+Good morning everyone.
+Good night and sleep well.
+Good luck with your interview.
+Good to hear from you.
+Good job on the presentation.
+Have a good day.
+Have a great weekend.
+Have a safe trip.
+Have a wonderful birthday.
+Have fun tonight.
+Happy birthday to you.
+Happy anniversary to you both.
+See you soon.
+See you tomorrow morning.
+See you at the entrance.
+See you in a bit.
+See you later today.
+Talk to you later.
+Talk soon.
+Take care of yourself.
+Take your time.
+No problem at all.
+No worries about that.
+No need to rush.
+Not sure about that.
+Not right now.
+Never mind I found it.
+Sorry for the delay.
+Sorry I missed your call.
+Sorry to hear that.
+Sorry about the confusion.
+Please let me know.
+Please send me the details.
+Please call me when you can.
+Please don't forget the keys.
+Please check your messages.
+Please give me a moment.
+Yes that works for me.
+Yes please send it over.
+Yes of course.
+Sure I can do that.
+Sure no problem.
+Sounds good to me.
+Sounds like a plan.
+Absolutely let's do it.
+Maybe we can go tomorrow.
+Maybe next time.
+Of course you can.
+By the way I sent you the link.
+As soon as I get home.
+At the end of the day.
+In the morning before work.
+In a few minutes.
+On my way to work.
+On the way home.
+On the other hand.
+For some reason it stopped working.
+For the first time.
+Looking forward to it.
+Looking forward to seeing you.
+Just let me know.
+Just a few more minutes.
+Just checking if you're okay.
+Still waiting for a reply.
+Almost there see you soon.
+Dinner is ready.
+The food was delicious.
+The kids are asleep.
+The meeting has been moved to tomorrow.
+The meeting starts at nine.
+The weather is lovely today.
+The train is running late.
+The package has arrived.
+The door is open.
+The address is in the message.
+The link isn't working.
+The app keeps crashing.
+The update is ready to install.
+My phone is out of battery.
+My car is parked outside.
+My flight has been delayed.
+My appointment is tomorrow morning.
+Your order is ready.
+Your message just came through.
+Everything is ready for tomorrow.
+Everything is going well.
+Everything looks good.
+Nothing to worry about.
+Something came up at work.
+Someone will be there to help.
+Tomorrow morning would be better.
+Today has been really busy.
+Tonight works for me.
+After work I will call you.
+Before you leave please call me.
+If you need anything let me know.
+If that works for you.
+If you have any questions please ask.
+As long as you are happy.
+Because I have to work tomorrow.
+But I can come later.
+And then we can go home.
+So what do you think?
+Can you please share the location?
+I sent you the details by email.
+I haven't received it yet.
+I already checked the settings.
+I will try restarting it.
+I changed my mind.
+I am looking for a place to eat.
+I am looking for the right address.
+I am proud of you.
+I am glad you made it.
+I am sorry to bother you.
+I am available tomorrow afternoon.
+I am not available this evening.
+I am having lunch with a friend.
+I am taking the kids to school.
+I am picking up the kids.
+I am leaving the office now.
+I am stuck in traffic.
+I am almost finished.
+I am about to leave.
+I will be home in ten minutes.
+I will be back tomorrow.
+I will send you the link.
+I will send you a message.
+I will check it in the morning.
+I will bring it with me.
+I will try to get there early.
+I would love to join you.
+I would rather stay home.
+I need a little more time.
+I need your advice.
+I need some help with this.
+I have no idea.
+I have a lot of work to do.
+I have an appointment tomorrow.
+I have the same problem.
+I have never been there before.
+We can talk when you get home.
+We can order something for dinner.
+We can try again tomorrow.
+We should leave a bit earlier.
+We should make a reservation.
+Can you hear me now?
+Can you see the picture?
+Can you bring some milk?
+Can you save me a seat?
+Can you remind me tomorrow?
+Do you have any plans for the weekend?
+Do you want me to bring anything?
+Do you want to go for a walk?
+Do you think we have enough time?
+Are you feeling any better?
+Are you still coming tonight?
+What would you like for dinner?
+What should I bring?
+What time should I be there?
+What time will you get home?
+How can I help you?
+How many people are coming?
+How far is it from here?
+How do I get there?
+Where can I find the details?
+When would be a good time?
+Thank you for being there for me.
+Thank you for your patience.
+Thank you for the invitation.
+Thank you for the reminder.
+Thanks for the heads up.
+Thanks that would be great.
+Sorry I can't make it.
+Sorry I didn't see your message.
+Sorry for bothering you.
+Please keep me updated.
+Please let me know when it arrives.
+Please tell me when you are free.
+Don't worry about it.
+Don't forget to bring your keys.
+Don't hesitate to ask.
+Enjoy the rest of your day.
+Enjoy your holiday.
+Hope you feel better soon.
+Hope to see you again soon.
+Safe travels.
+Welcome back home.
+Glad to hear it.
+Nice to meet you.
+Nice to see you again.
+All the best.
+Best wishes for the new year.

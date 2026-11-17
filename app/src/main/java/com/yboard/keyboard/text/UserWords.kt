@@ -16,6 +16,8 @@ class UserWords private constructor(private val sp: SharedPreferences?, private 
     private class Entry(var spelling: String, var count: Int)
 
     private val words = HashMap<String, Entry>()
+    private var revision = 0L
+    val cacheRevision: Long get() = revision + mineRevision
     private val handler by lazy { Handler(Looper.getMainLooper()) }
     private var savePending = false
 
@@ -53,6 +55,7 @@ class UserWords private constructor(private val sp: SharedPreferences?, private 
         val e = words.getOrPut(norm) { Entry(clean, 0) }
         e.count = (e.count + amount).coerceAtMost(9999)
         e.spelling = clean
+        revision++
         if (words.size > MAX_WORDS) trim()
         scheduleSave()
     }
@@ -63,11 +66,12 @@ class UserWords private constructor(private val sp: SharedPreferences?, private 
             .distinctBy { Dictionary.normalize(it) }.take(n)
 
     fun forget(norm: String) {
-        if (words.remove(norm) != null) scheduleSave()
+        if (words.remove(norm) != null) { revision++; scheduleSave() }
     }
 
     fun clear() {
         words.clear()
+        revision++
         scheduleSave()
     }
 
@@ -125,11 +129,13 @@ class UserWords private constructor(private val sp: SharedPreferences?, private 
 
         /** "My words" by language ("en" / "he"): normalized -> spelling. */
         @Volatile private var myWords: Map<String, Map<String, String>> = emptyMap()
+        @Volatile private var mineRevision = 0L
 
         /** Sets "My words" (from settings). Each word goes to its language by its letters. */
         fun setMyWords(list: List<String>) {
-            myWords = list.groupBy { MyWords.languageOf(it) }
+            val next = list.groupBy { MyWords.languageOf(it) }
                 .mapValues { (_, ws) -> ws.associateBy { Dictionary.normalize(it) } }
+            if (next != myWords) { myWords = next; mineRevision++ }
         }
 
         fun learnedFreq(count: Int): Int = (110 + count * 15).coerceAtMost(240)

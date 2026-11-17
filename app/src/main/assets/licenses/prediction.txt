@@ -1,0 +1,4 @@
+The conversational examples in assets/prediction/en.txt and he.txt are original
+Yboard project material, distributed under the same license as the application.
+They are synthetic examples written for next-word prediction. They contain no
+personal typing history and are not an extract from a third-party message corpus.

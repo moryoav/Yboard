@@ -52,6 +52,7 @@ class ToolbarView(context: Context) : View(context) {
     private val handler = Handler(Looper.getMainLooper())
     private var pressed: Action? = null
     private var pressedSlot = -1
+    val suggestionTouchActive: Boolean get() = pressedSlot >= 0
     private var longPressed = false
 
     private var suggestions: List<String> = emptyList()

@@ -53,6 +53,11 @@ import com.yboard.keyboard.settings.YboardSettings
 import com.yboard.keyboard.text.Dictionary
 import com.yboard.keyboard.text.EmojiSearch
 import com.yboard.keyboard.text.NextWords
+import com.yboard.keyboard.text.PhraseModel
+import com.yboard.keyboard.text.PredictionCache
+import com.yboard.keyboard.text.PredictionContext
+import com.yboard.keyboard.text.PredictionPosition
+import com.yboard.keyboard.text.PredictionStats
 import com.yboard.keyboard.text.Pt
 import com.yboard.keyboard.text.Suggester
 import com.yboard.keyboard.text.SwipeDecoder
@@ -98,6 +103,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     private var stickerImage: StickerImage? = null
     private var stickerSource = ""
     private val dictionaries = HashMap<String, Dictionary?>()
+    private val phraseModels = HashMap<String, PhraseModel>()
     private val loading = HashSet<String>()
     private var suggester: Suggester? = null
     private var decoder: SwipeDecoder? = null
@@ -105,6 +111,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     private var enginePersonalized = false
     private var suggestionsAllowed = false
     private var learningAllowed = false
+    private var predictionFieldActive = false
 
     /** What each of the 3 strip slots will type ("" = empty slot). */
     private var slotWords: List<String> = emptyList()
@@ -121,7 +128,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     private class AutoCorrection(val original: String, val fixed: String, val separator: String)
     private var lastAutoCorrect: AutoCorrection? = null
 
-    private class SwipeCommit(val word: String, val alternatives: List<String>, val previous: String?)
+    private class SwipeCommit(val word: String, val alternatives: List<String>, val before: String)
     private var lastSwipe: SwipeCommit? = null
 
     // Backspace slide-to-delete-words.
@@ -145,7 +152,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         }
         override fun showMessage(text: String) = Toast.makeText(this@YboardIME, text, Toast.LENGTH_LONG).show()
         override fun onDictated(before: String, text: String) {
-            learnAccepted(text, NextWords.lastWordOf(before))
+            learnAccepted(text, before)
         }
         override fun sendMessage(lastTry: Boolean): VoiceTyping.SendResult {
             val info = editorInfo
@@ -215,6 +222,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         clipboard?.removePrimaryClipChangedListener(clipListener)
         worker.shutdown()
         aiExecutor.shutdownNow()
+        predictionExecutor.shutdownNow()
         super.onDestroy()
     }
 
@@ -302,6 +310,9 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         super.onStartInputView(info, restarting)
         closeSticker()
         cancelAiPredictions()
+        aiCache.clear()
+        predictionFieldActive = false
+        failedPosition = null
         endVoice()
         sprinkle = null
         sprinkleRound++
@@ -327,6 +338,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
             }
         learningAllowed = suggestionsAllowed &&
             (info.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) == 0
+        predictionFieldActive = true
         lastAutoCorrect = null
         lastSwipe = null
         rejected.clear()
@@ -339,18 +351,26 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
+        predictionFieldActive = false
         closeSticker()
         endVoice()
         cancelAiPredictions()
+        aiCache.clear()
+        failedPosition = null
+        stripBefore = null
         root?.keyboard?.cancelAllPointers()
         super.onFinishInputView(finishingInput)
     }
 
     override fun onFinishInput() {
+        predictionFieldActive = false
         closeSticker()
         endVoice()
         super.onFinishInput()
         cancelAiPredictions()
+        aiCache.clear()
+        failedPosition = null
+        stripBefore = null
         clearAutofill()
     }
 
@@ -431,9 +451,11 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         if (dictionaries.containsKey(lang) || !loading.add(lang)) return
         worker.execute {
             val d = Dictionary.load(this, lang)
+            val phrases = runCatching { PhraseModel.load(this, lang) }.getOrNull()
             main.post {
                 loading.remove(lang)
                 dictionaries[lang] = d
+                if (phrases != null) phraseModels[lang] = phrases
                 if (lang == settings.activeLanguage) {
                     engineLanguage = ""
                     rebuildEngine()
@@ -465,11 +487,11 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
             decoder != null && emojiSearchBar == null
     }
 
-    private fun isWordChar(c: Char) = c.isLetter() || c == '\'' || c == '’' || c == '׳' || c == '״'
+    private fun isWordChar(c: Char) = PredictionContext.isWordChar(c)
 
     /** The word right before the cursor (what you're typing now). */
     private fun wordBeforeCursor(): String {
-        val before = currentInputConnection?.getTextBeforeCursor(48, 0) ?: return ""
+        val before = suggestionText?.takeLast(48) ?: currentInputConnection?.getTextBeforeCursor(48, 0) ?: return ""
         var i = before.length
         while (i > 0 && isWordChar(before[i - 1])) i--
         return before.subSequence(i, before.length).toString().trimStart('\'', '’', '׳', '״')
@@ -491,11 +513,13 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     private fun swipeWordBeforeCursor(): Boolean {
         val ls = lastSwipe ?: return false
         if (selStart != selEnd) return false
-        val before = currentInputConnection?.getTextBeforeCursor(ls.word.length, 0) ?: return false
+        val before = suggestionText?.takeLast(ls.word.length) ?: currentInputConnection?.getTextBeforeCursor(ls.word.length, 0) ?: return false
         return before.toString() == ls.word
     }
 
     private fun showStrip(words: List<String>, primary: Int, display: List<String> = words) {
+        stripBefore = suggestionText ?: currentInputConnection?.getTextBeforeCursor(PredictionContext.MAX_BEFORE + 64, 0)?.toString()
+        stripCursor = selEnd
         slotWords = words
         slotDisplay = display
         emojiSlot = -1
@@ -515,124 +539,162 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
 
     private fun nextWords() = NextWords.get(this, settings.activeLanguage)
 
-    // AI predictions: asked after a short pause, newest request wins, answers cached.
+    // Background features and predictions have separate workers so spelling cannot hold up typing.
     private val aiExecutor = Executors.newSingleThreadExecutor()
-    @Volatile private var aiRequest = 0
-    @Volatile private var aiCall: okhttp3.Call? = null
-    private var aiContext: String? = null
-    private var aiTask: java.util.concurrent.Future<*>? = null
-    private val aiCache = object : LinkedHashMap<String, List<String>>(32, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<String>>?) = size > 40
+    private val predictionExecutor = java.util.concurrent.ThreadPoolExecutor(1, 1, 0L, java.util.concurrent.TimeUnit.MILLISECONDS,
+        java.util.concurrent.LinkedBlockingQueue<Runnable>(1), java.util.concurrent.ThreadFactory { task -> Thread(task, "YboardPrediction") },
+        java.util.concurrent.ThreadPoolExecutor.DiscardOldestPolicy())
+    private class PredictionJob(val position: PredictionPosition) {
+        @Volatile var call: okhttp3.Call? = null
+        var future: java.util.concurrent.Future<*>? = null
+        var pending: Runnable? = null
     }
+    @Volatile private var predictionJob: PredictionJob? = null
+    private val aiCache = PredictionCache()
+    private var failedPosition: PredictionPosition? = null
+    private var retryAfter = 0L
+    private var stripBefore: String? = null
+    private var stripCursor = -1
+    // One editor read per refresh; never retained after returning to the event loop.
+    private var suggestionText: String? = null
 
     private fun cancelAiPredictions() {
-        aiRequest++
-        aiContext = null
-        aiCall?.cancel()
-        aiCall = null
-        aiTask?.cancel(true)
-        aiTask = null
+        val previous = predictionJob
+        predictionJob = null
+        previous?.pending?.let { main.removeCallbacks(it) }
+        previous?.call?.cancel()
+        previous?.future?.cancel(true)
+        predictionExecutor.purge()
+        if (previous != null) PredictionStats.count("superseded")
     }
 
-    private fun requestAiPredictions(before: String, prev: String?) {
-        if (!settings.aiPredictions || !settings.nextWords || !learningAllowed || !suggestionsAllowed) return
+    private fun aiAllowed() = predictionFieldActive && settings.aiPredictions && settings.nextWords && settings.suggestions && learningAllowed && suggestionsAllowed &&
+        selStart == selEnd && voice?.isActive != true && emojiSearchBar == null && mode != Mode.NUMBER && mode != Mode.PHONE
+
+    private fun predictionPosition(): PredictionPosition? {
+        if (selStart != selEnd || selEnd < 0) return null
+        val before = suggestionText ?: currentInputConnection?.getTextBeforeCursor(PredictionContext.MAX_BEFORE + 64, 0)?.toString() ?: return null
+        return PredictionContext.position(before, selEnd)
+    }
+
+    private fun requestAiPredictions(position: PredictionPosition) {
+        if (!aiAllowed()) { cancelAiPredictions(); return }
+        if (predictionJob?.position?.sameWord(position) == false) cancelAiPredictions()
+        if (position.before.isBlank() || !position.before.last().isWhitespace()) return
+        if (predictionJob?.position?.sameWord(position) == true) return
+        if (aiCache.complete(position)) return
+        if (failedPosition?.sameWord(position) == true && SystemClock.elapsedRealtime() < retryAfter) return
         val key = com.yboard.keyboard.voice.ApiKeyStore.get(this) ?: return
-        val ctx = before.takeLast(300)
         val lang = settings.activeLanguage
         val choice = settings.aiModels[AiFeature.PREDICTION]
-        val cacheKey = "$lang|${choice.model}|${choice.effort}|$ctx"
-        aiCache[cacheKey]?.let { showAiPredictions(ctx, it); return }
-        if (cacheKey == aiContext) return
         cancelAiPredictions()
-        aiContext = cacheKey
-        val id = aiRequest
-        val words = if (settings.learnWords) userWords().topWords(20) else emptyList()
-        val pairs = if (settings.learnWords) nextWords().topPairs(12) else emptyList()
-        main.postDelayed({
-            if (id != aiRequest) return@postDelayed
-            aiTask = aiExecutor.submit {
-                if (id != aiRequest) return@submit
-                val preds = try {
-                    OpenAi.predictNext(key, ctx, lang, words, pairs, prev, choice) { call ->
-                        aiCall = call
-                        if (id != aiRequest) call.cancel()
+        val job = PredictionJob(position.copy(prefix = ""))
+        predictionJob = job
+        val words = if (settings.learnWords) userWords().topWords(8) else emptyList()
+        val pairs = if (settings.learnWords) nextWords().hints(position.before, 8) else emptyList()
+        val queued = SystemClock.elapsedRealtime()
+        val pending = Runnable {
+            if (predictionJob !== job) return@Runnable
+            job.future = predictionExecutor.submit {
+                if (predictionJob !== job) return@submit
+                PredictionStats.time("queue", SystemClock.elapsedRealtime() - queued)
+                PredictionStats.count("requests")
+                val result = runCatching {
+                    OpenAi.predictNext(key, position.before, lang, words, pairs, NextWords.lastWordOf(position.before), choice,
+                        onPredictions = { predictions -> main.post {
+                            if (predictionJob !== job || !aiAllowed()) return@post
+                            aiCache.put(job.position, predictions, complete = false)
+                            renderAiPredictions(job.position)
+                        } }) { call ->
+                        job.call = call
+                        if (predictionJob !== job) call.cancel()
                     }
-                } catch (e: Exception) {
-                    null
                 }
                 main.post {
-                    if (id != aiRequest) return@post
-                    aiCall = null
-                    if (preds.isNullOrEmpty()) return@post
-                    aiCache[cacheKey] = preds
-                    showAiPredictions(ctx, preds)
+                    if (predictionJob !== job) return@post
+                    predictionJob = null
+                    val predictions = result.getOrNull()
+                    if (predictions.isNullOrEmpty()) {
+                        aiCache.remove(job.position)
+                        failedPosition = job.position
+                        val error = result.exceptionOrNull()
+                        retryAfter = SystemClock.elapsedRealtime() + if (error is OpenAi.ApiError && error.code in listOf(401, 403, 429)) 30_000 else 3_000
+                        PredictionStats.count("failed")
+                        updateSuggestions()
+                    } else {
+                        aiCache.put(job.position, predictions)
+                        renderAiPredictions(job.position)
+                    }
                 }
             }
-        }, 80)
-    }
-
-    /** Puts the AI's guesses in the strip, if you haven't typed anything since. */
-    private fun showAiPredictions(ctx: String, preds: List<String>) {
-        if (!settings.aiPredictions || !settings.nextWords || !suggestionsAllowed || !learningAllowed || selStart != selEnd) return
-        if (voice?.isActive == true || emojiSearchBar != null || currentWord.isNotEmpty()) return
-        val now = currentInputConnection?.getTextBeforeCursor(300, 0)?.toString() ?: return
-        if (now.takeLast(300) != ctx) return
-        val local = listOf(slotWords.getOrElse(1) { "" }, slotWords.getOrElse(0) { "" }, slotWords.getOrElse(2) { "" })
-            .filterIndexed { i, w -> w.isNotEmpty() && !(i == 2 && emojiSlot == 2) }
-        val merged = (preds + local).distinctBy { it.lowercase() }.take(3)
-        val emoji = if (emojiSlot == 2) slotWords.getOrNull(2) else null
-        typedSlot = -1
-        showStrip(listOf(merged.getOrElse(1) { "" }, merged.getOrElse(0) { "" }, merged.getOrElse(2) { "" }), 1)
-        if (emoji != null) {
-            slotWords = slotWords.toMutableList().also { it[2] = emoji }
-            slotDisplay = slotDisplay.toMutableList().also { it[2] = emoji }
-            emojiSlot = 2
-            root?.toolbar?.setSuggestions(slotDisplay, 1)
         }
+        job.pending = pending
+        main.postDelayed(pending, 25)
     }
 
-    /** The word before [word] at the cursor (null at the start of a sentence). */
-    private fun wordBefore(word: String): String? {
-        val before = currentInputConnection?.getTextBeforeCursor(80, 0)?.toString() ?: return null
-        val rest = if (word.isNotEmpty() && before.endsWith(word)) before.dropLast(word.length) else before
-        return NextWords.lastWordOf(rest)
+    private fun renderAiPredictions(position: PredictionPosition) {
+        if (!aiAllowed() || swipeWordBeforeCursor()) return
+        val now = predictionPosition() ?: return
+        if (!now.sameWord(position) || cursorInsideWord()) { PredictionStats.count("discarded"); return }
+        // Keep the word under the finger stable until the tap or long press has finished.
+        if (root?.toolbar?.suggestionTouchActive == true) {
+            main.postDelayed({ renderAiPredictions(position) }, 32)
+            return
+        }
+        updateSuggestions()
+        PredictionStats.count("applied")
     }
 
-    private fun learnPair(prev: String?, word: String) {
+    private fun localPredictions(position: PredictionPosition, limit: Int = 3): List<String> = nextWords().predictContext(
+        position.before, position.prefix, limit, phraseModels[settings.activeLanguage], settings.learnWords && learningAllowed)
+
+    private fun cloudWords(position: PredictionPosition): List<String> {
+        if (!aiAllowed()) return emptyList()
+        val words = aiCache.words(position)
+        if (words.isNotEmpty()) PredictionStats.count("cache_hit")
+        return words.map { Suggester.applyCase(position.prefix, it) }
+    }
+
+    /** Sentence context before the word being accepted, excluding its unfinished prefix. */
+    private fun contextBefore(word: String): String {
+        val before = currentInputConnection?.getTextBeforeCursor(PredictionContext.MAX_BEFORE + 64, 0)?.toString().orEmpty()
+        return if (word.isNotEmpty() && before.endsWith(word)) before.dropLast(word.length) else before
+    }
+
+    private fun learnPair(before: String, word: String) {
         if (!settings.learnWords || !learningAllowed) return
         if (word.isBlank() || word.any { it.isDigit() }) return
-        nextWords().learn(prev, word)
+        nextWords().learnContext(before, word)
     }
 
-    private fun learnAccepted(text: String, previous: String?, amount: Int = 1) {
-        var prev = previous
+    private fun learnAccepted(text: String, before: String, amount: Int = 1) {
+        if (!settings.learnWords || !learningAllowed) return
+        nextWords().learnText(text, before)
         Regex("[\\p{L}\\p{M}'’]+|[.!?\\n]").findAll(text).forEach { token ->
-            if (token.value in listOf(".", "!", "?", "\n")) { prev = null; return@forEach }
+            if (token.value in listOf(".", "!", "?", "\n")) return@forEach
             learn(token.value, amount)
-            learnPair(prev, token.value)
-            prev = token.value
         }
     }
 
     private fun acceptSwipe() {
         val swipe = lastSwipe ?: return
-        if (swipeWordBeforeCursor()) learnAccepted(swipe.word, swipe.previous)
+        if (swipeWordBeforeCursor()) learnAccepted(swipe.word, swipe.before)
         lastSwipe = null
     }
 
     /** After a space: likely next words (and an emoji for the last word). */
     private fun showPredictions() {
         if (!settings.nextWords && !settings.emojiSuggest) { clearStrip(); return }
-        val before = currentInputConnection?.getTextBeforeCursor(300, 0)?.toString()
-        if (before.isNullOrBlank() || !before.last().isWhitespace()) { clearStrip(); return }
-        val prev = NextWords.lastWordOf(before)
-        val preds = if (settings.nextWords) nextWords().predict(prev, sentenceStart = prev == null, limit = 3) else emptyList()
+        val position = predictionPosition() ?: run { cancelAiPredictions(); clearStrip(); return }
+        if (position.before.isNotEmpty() && !position.before.last().isWhitespace()) { cancelAiPredictions(); clearStrip(); return }
+        val prev = NextWords.lastWordOf(position.before)
+        val preds = if (settings.nextWords) (cloudWords(position) + localPredictions(position)).distinctBy { it.lowercase() }.take(3) else emptyList()
         currentWord = ""
         typedSlot = -1
         showStrip(listOf(preds.getOrElse(1) { "" }, preds.getOrElse(0) { "" }, preds.getOrElse(2) { "" }), 1)
         addEmoji(prev)
         if (slotWords.all { it.isEmpty() }) clearStrip()
-        requestAiPredictions(before, prev)
+        requestAiPredictions(position)
     }
 
     private fun clearStrip() {
@@ -640,6 +702,8 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         emojiSlot = -1
         typedSlot = -1
         currentWord = ""
+        stripBefore = null
+        stripCursor = -1
         root?.toolbar?.setSuggestions(emptyList(), -1)
     }
 
@@ -655,8 +719,21 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     }
 
     private fun updateSuggestions() {
-        if (voice?.isActive == true) return
-        if (sprinkleNote()) return
+        if (!predictionFieldActive) { clearStrip(); return }
+        val started = SystemClock.elapsedRealtime()
+        try {
+            if (suggestionsAllowed && settings.suggestions && voice?.isActive != true && emojiSearchBar == null && selStart == selEnd)
+                suggestionText = currentInputConnection?.getTextBeforeCursor(PredictionContext.MAX_BEFORE + 64, 0)?.toString()
+            updateSuggestionsNow()
+        } finally {
+            suggestionText = null
+            PredictionStats.time("local", SystemClock.elapsedRealtime() - started)
+        }
+    }
+
+    private fun updateSuggestionsNow() {
+        if (voice?.isActive == true) { cancelAiPredictions(); return }
+        if (sprinkleNote()) { cancelAiPredictions(); return }
         if (emailLayout() && emojiSearchBar == null && selStart == selEnd) { showEmailChips(); return }
         if (emojiSearchBar != null || !settings.suggestions || !suggestionsAllowed ||
             mode == Mode.NUMBER || mode == Mode.PHONE
@@ -675,18 +752,22 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         val w = wordBeforeCursor()
         if (cursorInsideWord()) { cancelAiPredictions(); clearStrip(); return }
         if (w.isEmpty()) { showPredictions(); return }
-        cancelAiPredictions()
         val sug = suggester ?: run { clearStrip(); return }
+        val position = predictionPosition() ?: run { cancelAiPredictions(); clearStrip(); return }
+        if (predictionJob?.position?.sameWord(position) == false) cancelAiPredictions()
         currentWord = w
+        val rankedAt = SystemClock.elapsedRealtime()
         val r = sug.suggest(w)
-        val s = r.suggestions
+        PredictionStats.time("dictionary", SystemClock.elapsedRealtime() - rankedAt)
+        val contextual = if (settings.nextWords) cloudWords(position) + localPredictions(position, 5) else emptyList()
+        val s = (contextual + r.suggestions).filterNot { it.equals(w, true) }.distinctBy { it.lowercase() }.take(3)
         if (r.known) {
             // [alternative] [what you typed] [alternative]
             showStrip(listOf(s.getOrElse(0) { "" }, w, s.getOrElse(1) { "" }), 1)
             typedSlot = 1
         } else {
             // ["what you typed"] [best fix] [next]
-            val best = r.autoCorrect ?: s.firstOrNull()
+            val best = contextual.firstOrNull() ?: r.autoCorrect ?: s.firstOrNull()
             val rest = s.filter { it != best }
             if (best == null) {
                 showStrip(listOf("", w, ""), 1, listOf("", "“$w”", ""))
@@ -703,6 +784,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
             return
         }
         addEmoji(r.autoCorrect ?: w)
+        requestAiPredictions(position)
     }
 
     /** Fixes the word before the cursor (if it looks like a typo) and adds [separator]. */
@@ -728,7 +810,6 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         ic.commitText(fix + separator, 1)
         ic.endBatchEdit()
         lastAutoCorrect = AutoCorrection(w, fix, separator)
-        learn(fix)
         return true
     }
 
@@ -738,15 +819,15 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         acceptSwipe()
         if (wasSwipe) return false
         val typed = wordBeforeCursor()
-        val prev = if (typed.isNotEmpty() && suggestionsAllowed) wordBefore(typed) else null
+        val before = if (typed.isNotEmpty() && suggestionsAllowed) contextBefore(typed) else ""
         if (applyAutoCorrect(separator)) {
-            lastAutoCorrect?.let { learnPair(prev, it.fixed) }
+            lastAutoCorrect?.let { learnAccepted(it.fixed, before) }
             return true
         }
         val w = typed
         if (w.isNotEmpty() && !cursorInsideWord() && suggestionsAllowed) {
             learn(w)
-            learnPair(prev, w)
+            learnPair(before, w)
         }
         return false
     }
@@ -804,7 +885,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     // ------------------------------------------------------- key handling
 
     override fun onKey(key: KeyDef) {
-        cancelAiPredictions()
+        stripBefore = null
         endVoice()
         if (emojiSearchBar != null && handleSearchKey(key)) return
         if (key.type != KeyType.BACKSPACE) lastAutoCorrect = null
@@ -959,6 +1040,8 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
 
     override fun onCursorMove(steps: Int) {
         endVoice()
+        cancelAiPredictions()
+        aiCache.clear()
         val code = if (steps > 0) KeyEvent.KEYCODE_DPAD_RIGHT else KeyEvent.KEYCODE_DPAD_LEFT
         repeat(abs(steps)) { sendDownUpKeyEvents(code) }
     }
@@ -991,7 +1074,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         val word = alts[0]
         acceptSwipe()
         lastAutoCorrect = null
-        val prevWord = NextWords.lastWordOf(ic.getTextBeforeCursor(80, 0)?.toString().orEmpty())
+        val priorContext = ic.getTextBeforeCursor(PredictionContext.MAX_BEFORE, 0)?.toString().orEmpty()
         val before = ic.getTextBeforeCursor(1, 0)
         // Add a space between swiped words automatically.
         val needSpace = !before.isNullOrEmpty() && (before.last().isLetterOrDigit() || before.last() in ".,!?:;")
@@ -1001,7 +1084,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         ic.endBatchEdit()
         if (shift == ShiftState.ON) setShift(ShiftState.OFF)
         // Learn only once accepted, so a rejected decoder guess does not teach itself.
-        lastSwipe = SwipeCommit(word, alts, prevWord)
+        lastSwipe = SwipeCommit(word, alts, priorContext)
         lastSpaceTime = 0
         // Show alternatives right away (the cursor update will confirm them).
         val others = alts.drop(1)
@@ -1046,13 +1129,19 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
 
     override fun onSuggestion(index: Int) {
         endVoice()
-        cancelAiPredictions()
         sprinkle?.let { sp ->
             if (index == 1 && sp.newText != null) undoSprinkle()
             return
         }
         val word = slotWords.getOrNull(index)?.takeIf { it.isNotEmpty() } ?: return
         val ic = currentInputConnection ?: return
+        if (stripBefore == null || selStart != selEnd || stripCursor != selEnd ||
+            ic.getTextBeforeCursor(PredictionContext.MAX_BEFORE + 64, 0)?.toString() != stripBefore) {
+            updateSuggestions()
+            return
+        }
+        cancelAiPredictions()
+        PredictionStats.count("accepted")
         lastAutoCorrect = null
         emailChips.getOrNull(index)?.let { chip ->
             ic.beginBatchEdit()
@@ -1078,19 +1167,19 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
             lastSwipe = null
             ic.commitText("$word ", 1)
             ic.endBatchEdit()
-            learnAccepted(word, ls.previous, 2)
+            learnAccepted(word, ls.before, 2)
             currentWord = ""
             updateSuggestions()
             return
         }
         val w = currentWord
-        val prev = wordBefore(w)
+        val before = contextBefore(w)
         ic.beginBatchEdit()
         ic.deleteSurroundingText(w.length, 0)
         ic.commitText("$word ", 1)
         ic.endBatchEdit()
         // Picking exactly what you typed teaches Yboard that word right away.
-        learnAccepted(word, prev, 2)
+        learnAccepted(word, before, 2)
         currentWord = ""
         if (shift == ShiftState.ON) setShift(ShiftState.OFF)
         updateSuggestions()
