@@ -82,6 +82,7 @@ class MainActivity : ComponentActivity() {
         const val OPEN_VOICE = "voice"
         const val OPEN_ABOUT = "about"
         const val OPEN_AI_MODELS = "ai_models"
+        const val OPEN_TYPING = "typing"
     }
 }
 
@@ -154,6 +155,10 @@ fun YboardSettingsApp(openRequest: MutableState<String?> = mutableStateOf(null))
 
     val request = openRequest.value
     LaunchedEffect(request) {
+        if (request == MainActivity.OPEN_TYPING) {
+            stackNames = listOf(Screen.HOME.name, Screen.TYPING.name)
+            openRequest.value = null
+        }
         if (request == MainActivity.OPEN_AI_MODELS) {
             stackNames = listOf(Screen.HOME.name, Screen.AI_MODELS.name)
             openRequest.value = null

@@ -4,7 +4,6 @@ import android.text.InputType
 import android.view.inputmethod.EditorInfo
 import com.yboard.keyboard.settings.*
 import com.yboard.keyboard.text.*
-import com.yboard.keyboard.voice.OpenAi
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
@@ -69,9 +68,5 @@ class GlideRegressionTest {
         assertNull(AiModel("gpt-4.1-mini").reasoning)
         assertEquals("none", AiModel("gpt-5.4-nano").reasoning)
         assertNull(AiModel("gpt-5.4-nano", "default").reasoning)
-        val choice = AiModels()[AiFeature.PREDICTION]
-        val request = JSONObject(OpenAi.predictRequestJson(choice.model, "I love ", "en", emptyList(), emptyList(), choice.reasoning))
-        assertEquals("none", request.getJSONObject("reasoning").getString("effort"))
-        assertFalse(request.getBoolean("store"))
     }
 }

@@ -3,6 +3,7 @@
 param(
     [Parameter(Mandatory)][string]$NotesFile,
     [string]$OutputDirectory = (Join-Path ([IO.Path]::GetTempPath()) 'Yboard-releases'),
+    [string]$ModelFile,
     [switch]$SkipBuild
 )
 
@@ -56,6 +57,20 @@ $versionCode = [long]$version.versionCode
 if ($versionName -notmatch '^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$' -or $versionCode -le 461164) { throw 'Set a new release version in version.properties.' }
 $tag = "v$versionName"
 $prerelease = $versionName.Contains('-')
+$modelAsset = $null
+if ($versionName -eq '1.9.0' -and -not $ModelFile) { throw 'Supply the verified Qwen model for the first local-prediction release.' }
+if ($ModelFile) {
+    $ModelFile = (Resolve-Path -LiteralPath $ModelFile).Path
+    $modelSource = Get-Content -LiteralPath 'app/src/main/java/com/yboard/keyboard/local/QwenModel.kt' -Raw
+    $modelName = [regex]::Match($modelSource, 'const val FILE_NAME = "([^"]+)"').Groups[1].Value
+    $modelDigest = [regex]::Match($modelSource, 'const val SHA256 = "([a-f0-9]{64})"').Groups[1].Value
+    $modelSize = [long]([regex]::Match($modelSource, 'const val SIZE = ([0-9_]+)L').Groups[1].Value.Replace('_', ''))
+    if ((Split-Path $ModelFile -Leaf) -ne $modelName -or (Get-Item -LiteralPath $ModelFile).Length -ne $modelSize -or
+        (Get-FileHash -LiteralPath $ModelFile -Algorithm SHA256).Hash.ToLowerInvariant() -ne $modelDigest) {
+        throw 'The Qwen release asset does not match the model pinned in the app.'
+    }
+    $modelAsset = $ModelFile
+}
 $latestJson = & gh api "repos/$repo/releases/latest" 2>$null
 if ($LASTEXITCODE -eq 0) {
     $latestRelease = $latestJson | ConvertFrom-Json
@@ -118,14 +133,23 @@ Invoke-Git @('push', 'origin', "refs/tags/$tag") | Out-Null
 $existing = Get-Release $tag
 if ($existing) {
     if (-not $existing.draft) { throw 'This release is already published. Bump the version instead of replacing it.' }
-    Invoke-Gh @('release', 'upload', $tag, $publishedApk, $manifestPath, '--repo', $repo, '--clobber') | Out-Null
+    $upload = @('release', 'upload', $tag, $publishedApk, $manifestPath)
+    if ($modelAsset) { $upload += $modelAsset }
+    Invoke-Gh ($upload + @('--repo', $repo, '--clobber')) | Out-Null
     Invoke-Gh @('release', 'edit', $tag, '--repo', $repo, '--notes-file', $NotesFile) | Out-Null
 } else {
     $create = @('release', 'create', $tag, $publishedApk, $manifestPath, '--repo', $repo, '--verify-tag', '--draft', '--title', "Yboard $versionName", '--notes-file', $NotesFile)
+    if ($modelAsset) { $create += $modelAsset }
     if ($prerelease) { $create += '--prerelease' }
     Invoke-Gh $create | Out-Null
 }
 $saved = Get-Release $tag
+if ($modelAsset) {
+    $uploadedModel = $saved.assets | Where-Object name -EQ $modelName
+    if ($uploadedModel.state -ne 'uploaded' -or $uploadedModel.size -ne $modelSize -or $uploadedModel.digest -ne "sha256:$modelDigest") {
+        throw 'The uploaded Qwen model did not match the pinned model. The release remains a draft.'
+    }
+}
 $uploadedApk = $saved.assets | Where-Object name -EQ $apkName
 if ($uploadedApk.state -ne 'uploaded' -or $uploadedApk.size -ne (Get-Item -LiteralPath $publishedApk).Length -or $uploadedApk.digest -ne "sha256:$sha256") {
     throw 'The uploaded APK did not match the local APK. The release remains a draft.'

@@ -88,12 +88,10 @@ object SettingsIndex {
         SettingEntry("One-handed mode", Screen.LAYOUT, LAYOUT, "one hand left right thumb small יד אחת"),
         // Typing
         SettingEntry("Word suggestions", Screen.TYPING, "$TYPING › Suggestions", "suggestions strip words הצעות"),
-        SettingEntry("Autocorrect", Screen.TYPING, "$TYPING › Suggestions", "auto correct typo spelling fix תיקון"),
         SettingEntry("Next-word predictions", Screen.TYPING, "$TYPING › Suggestions", "predict next word"),
-        SettingEntry("AI predictions", Screen.TYPING, "$TYPING › Suggestions", "ai openai smart learn style"),
+        SettingEntry("Local predictions", Screen.TYPING, TYPING, "qwen llm ai offline download model typing swipe prediction context"),
         SettingEntry("AI models", Screen.AI_MODELS, "AI models", "model reasoning thinking effort prediction voice transcription", null),
         SettingEntry("AI usage & cost", Screen.AI_MODELS, "AI models › Usage & estimated cost", "tokens input output cached cost price day week month spending usage", "Usage & estimated cost"),
-        SettingEntry("Emoji suggestions", Screen.TYPING, "$TYPING › Suggestions", "emoji pizza אימוג'י"),
         SettingEntry("Emoji sprinkle button", Screen.TYPING, "$TYPING › Suggestions", "emoji sprinkle sparkle ai add emojis ✨ אימוג'י"),
         SettingEntry("Text shortcuts", Screen.SHORTCUTS, TYPING, "shortcuts omw abbreviation expand קיצורים", null),
         SettingEntry("My words", Screen.MY_WORDS, TYPING, "dictionary names slang add word personal מילים מילון", null),

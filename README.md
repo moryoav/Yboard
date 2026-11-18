@@ -21,7 +21,7 @@ A clean, customizable Android keyboard for English and Hebrew, styled after Gboa
 - Long-press: accents (é ñ…), numbers, punctuation; comma → emoji
 - Space-bar slide moves the cursor, vibration & sound with strength/volume
 - Quiet hours: under Sound & vibration, set a daily start and end time and pause key sounds, vibration, or both. Overnight schedules are supported; matching times mean all day. Usual settings resume afterward.
-- Local typing and swipe decoding work offline. Optional AI predictions, voice typing, name spellings and emoji sprinkle use your OpenAI key.
+- Typing predictions and swipe ranking use local Qwen after a one-time 397 MB model download. Voice typing, name spellings and emoji sprinkle use your OpenAI key.
 - Font: Google Sans (what Gboard uses), bundled under the SIL Open Font License, trimmed to
   Latin + Hebrew (`res/font/`, license in `assets/licenses/`)
 - Registers as ONE keyboard (no Android subtypes); 🌐 only flips English/Hebrew and never
@@ -36,9 +36,9 @@ A clean, customizable Android keyboard for English and Hebrew, styled after Gboa
 - Dictionaries: Google's open-source Android keyboard (AOSP LatinIME) word lists, English +
   Hebrew, 60k words each, Apache-2.0 (`assets/dict/`, notices in `assets/licenses/`).
 - Swipe typing works in ordinary text editors even when an app requests no suggestions. Password and numeric fields retain their specialized behavior.
-- Swipe decoding combines path alignment, endpoints, the bundled frequency dictionary and your local word usage. A rejected swipe guess is not learned as an accepted word.
-- Tapping a word accepts it, inserts a space and immediately offers the next word. Local predictions use up to four preceding words, bundled English/Hebrew conversational phrases and repeated personal habits. They also help complete the word being typed.
-- Optional AI predictions stream complete suggestions as they arrive and stay useful while the next word is typed. Cached phrase tails can supply the following words immediately. Predictions have their own worker, separate from background AI tasks. GPT-6 Luna with reasoning off remains the default. See [prediction behavior and validation](docs/predictions.md).
+- Swipe geometry supplies plausible words, then Qwen ranks them using the full sentence. Word frequencies do not rank swipe results. A rejected swipe guess is not learned as an accepted word.
+- Tapping a word accepts it and inserts a space. Qwen supplies next-word predictions and prefix completions using the full current sentence and one preceding sentence.
+- Only Qwen supplies word suggestions. Dictionary, phrase and cloud prediction fallbacks have been removed from the active keyboard. A resident quantized model and reusable sentence context reduce repeated work. See [prediction behavior, model provenance and validation](docs/predictions.md).
 - AI models: choose the model and reasoning for each text feature, plus both transcription models. Load available model IDs from your own OpenAI account. Unsupported choices report an error without silently changing the selection.
 - AI usage and cost: the AI models screen shows input, output and cached token totals with USD cost estimates for today, the last 7 days and the last 30 days. A model breakdown is available. Cache-write charges and duration-billed speech are included separately.
 - AI stickers: type a message and tap **Sticker** beside the microphone, then preview, recreate or send it. Choose the image model and supported planning level in AI models. The draft is preserved. WhatsApp receives its native sticker type; other apps control how they handle the image. See [AI stickers](docs/stickers.md).
@@ -63,7 +63,7 @@ A clean, customizable Android keyboard for English and Hebrew, styled after Gboa
 - Commands ("delete that", "question mark", "new line", "תמחק את זה"): phrases that look like
   commands go to the selected model (default `gpt-6.1-terra`, Responses API, structured output), which returns
   `{remove, insert}`; `remove` must match the end of the text or nothing is deleted.
-- AI features use the internet; the microphone is used only during voice typing. Passwords and fields requesting no personalized learning do not feed prediction requests or learning. Code: `voice/`.
+- Qwen word predictions stay on the device. Other AI features use the internet; the microphone is used only during voice typing. Passwords and fields requesting no personalized learning do not feed prediction requests or learning. Code: `voice/`.
 
 ## Code map
 - `ime/YboardIME.kt` — the keyboard service (typing, shift, enter, panels)

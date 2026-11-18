@@ -79,34 +79,16 @@ fun TypingScreen(settings: YboardSettings, onBack: () -> Unit, onShortcuts: () -
     val hasKey = remember { com.yboard.keyboard.voice.ApiKeyStore.get(context) != null }
     var confirmClear by remember { mutableStateOf(false) }
     ScreenScaffold("Typing", onBack) {
+        LocalPredictionSection()
         Section("Suggestions") {
-            SwitchRow("Word suggestions", "Show words in the strip above the keys as you type", settings.suggestions) { b ->
+            SwitchRow("Word suggestions", "Show local Qwen predictions as you type", settings.suggestions) { b ->
                 Prefs.update { it.copy(suggestions = b) }
             }
-            SwitchRow(
-                "Autocorrect", "Fix typos when you press space. Backspace right after undoes it",
-                settings.autoCorrect, enabled = settings.suggestions,
-            ) { b -> Prefs.update { it.copy(autoCorrect = b) } }
             SwitchRow(
                 "Next-word predictions", "After a space, suggest the word you'll probably type next",
                 settings.nextWords, enabled = settings.suggestions,
             ) { b -> Prefs.update { it.copy(nextWords = b) } }
-            SwitchRow(
-                "AI predictions",
-                if (hasKey) "Smarter next words in your own style, learned from how you write. Uses your OpenAI key"
-                else "Needs your OpenAI key first (Yboard → Voice typing)",
-                settings.aiPredictions, enabled = settings.suggestions && settings.nextWords && (hasKey || settings.aiPredictions),
-            ) { b -> Prefs.update { it.copy(aiPredictions = b) } }
-            if (settings.aiPredictions) {
-                HintText(
-                    "To guess your next words, Yboard sends OpenAI the last few sentences before the cursor and the words " +
-                        "you use most. Never from password fields or private (incognito) fields. OpenAI bills your account a tiny amount."
-                )
-            }
-            SwitchRow(
-                "Emoji suggestions", "Type \"pizza\" or \"פיצה\" and 🍕 shows up in the strip",
-                settings.emojiSuggest, enabled = settings.suggestions,
-            ) { b -> Prefs.update { it.copy(emojiSuggest = b) } }
+            HintText("Only Qwen predictions appear in the word strip. Dictionary autocorrect and the old phrase and emoji suggestions are no longer used. Text shortcuts still expand when you press space.")
             SwitchRow(
                 "Emoji sprinkle button",
                 if (hasKey) "A ✨ button above the keys adds fitting emojis to your message. Uses your OpenAI key"
@@ -248,8 +230,8 @@ fun AboutScreen(onBack: () -> Unit) {
             Text(
                 "Everything you type with the keys, your clipboard history, learned words and themes stay on this phone. " +
                     "The AI features use the internet, with your own OpenAI key: voice typing (while the mic is on, " +
-                    "your voice and, for commands, the text just before the cursor), AI predictions if you turn them on, " +
-                    "and the ✨ emoji sprinkle when you tap it. Update checks contact GitHub without sending keyboard text or your OpenAI key.",
+                    "your voice and, for commands, the text just before the cursor), " +
+                    "and the ✨ emoji sprinkle when you tap it. Update checks contact GitHub without sending keyboard text or your OpenAI key. Qwen predictions and swipe ranking run locally. The model download sends no typing text.",
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
             )
@@ -259,7 +241,9 @@ fun AboutScreen(onBack: () -> Unit) {
                 "Font: Google Sans, SIL Open Font License 1.1.\n" +
                     "Dictionaries: Android Open Source Project keyboard word lists, Apache License 2.0. " +
                     "Includes Dictionaries © Lexiteria LLC. Used by permission.\n" +
-                    "Emoji search words: Unicode CLDR, Unicode License v3.",
+                    "Emoji search words: Unicode CLDR, Unicode License v3.\n" +
+                    "Local model: Qwen3-0.6B-Base, Apache License 2.0, converted to Q4_K_M.\n" +
+                    "Inference runtime: llama.cpp, MIT License.",
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
             )

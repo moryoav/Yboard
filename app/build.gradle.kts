@@ -16,6 +16,7 @@ plugins {
 android {
     namespace = "com.yboard.keyboard"
     compileSdk = 35
+    ndkVersion = "27.0.12077973"
 
     signingConfigs {
         getByName("debug") {
@@ -35,6 +36,14 @@ android {
         testInstrumentationRunner = "com.yboard.keyboard.KeyboardSmokeInstrumentation"
         versionCode = appVersion.getProperty("versionCode").toInt()
         versionName = appVersion.getProperty("versionName")
+        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
+        externalNativeBuild {
+            cmake { arguments += listOf("-DANDROID_STL=c++_shared", "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON") }
+        }
+    }
+
+    externalNativeBuild {
+        cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1" }
     }
 
     buildTypes {

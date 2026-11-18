@@ -37,6 +37,8 @@ class SwipeDecoder(
     /** All candidate words whose first letter (lowercased) is [c], sorted by freq descending. */
     private val wordsStartingWith: (Char) -> List<WordFreq>,
 ) {
+    data class Candidate(val word: String, val cost: Float)
+    private var frequencyPrior = true
 
     // ------------------------------------------------------------------------------------------
     // Layout cache (rebuilt only when the key map changes).
@@ -87,6 +89,13 @@ class SwipeDecoder(
      */
     @Synchronized
     fun decode(path: List<Pt>, keyCenters: Map<Char, Pt>, keyWidth: Float, limit: Int = 4): List<String> {
+        return decodeScored(path, keyCenters, keyWidth, limit, includeFrequency = true).map { it.word }
+    }
+
+    /** Geometry candidates for Qwen. Frequency is disabled in the production local-model path. */
+    @Synchronized
+    fun decodeScored(path: List<Pt>, keyCenters: Map<Char, Pt>, keyWidth: Float, limit: Int = 24, includeFrequency: Boolean = false): List<Candidate> {
+        frequencyPrior = includeFrequency
         if (limit <= 0 || path.isEmpty() || keyCenters.isEmpty()) return emptyList()
         if (!(keyWidth > 0f) || keyWidth.isInfinite()) return emptyList()
         setLayout(keyCenters)
@@ -158,8 +167,8 @@ class SwipeDecoder(
             for (wf in words) consider(wf)
         }
 
-        val out = ArrayList<String>(bestCount)
-        for (i in 0 until bestCount) out.add(bestWord[i]!!)
+        val out = ArrayList<Candidate>(bestCount)
+        for (i in 0 until bestCount) out.add(Candidate(bestWord[i]!!, bestCost[i]))
         for (i in 0 until bestCount) bestWord[i] = null
         return out
     }
@@ -211,7 +220,7 @@ class SwipeDecoder(
         val freq = wf.freq.coerceIn(1, 255)
         // AOSP's byte is already a compressed frequency score. Taking its logarithm again
         // erased useful differences between common words and rare lookalikes.
-        val prior = W_FREQ * (255f - freq) / 32f
+        val prior = if (frequencyPrior) W_FREQ * (255f - freq) / 32f else 0f
         if (bestCount == bestLimit && prior >= bestCost[bestCount - 1]) return
 
         // Shape channel.

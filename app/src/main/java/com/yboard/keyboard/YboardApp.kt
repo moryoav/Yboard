@@ -9,5 +9,11 @@ class YboardApp : Application() {
         super.onCreate()
         Prefs.init(this)
         UsageStore.init(this)
+        com.yboard.keyboard.local.QwenModel.init(this)
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= TRIM_MEMORY_COMPLETE || level == TRIM_MEMORY_RUNNING_CRITICAL) com.yboard.keyboard.local.LocalQwen.release()
     }
 }

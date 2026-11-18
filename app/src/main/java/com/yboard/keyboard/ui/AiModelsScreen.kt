@@ -30,10 +30,11 @@ fun AiModelsScreen(settings: YboardSettings, onBack: () -> Unit) {
     var editing by remember { mutableStateOf<AiFeature?>(null) }
     val statuses by AiStatus.results.collectAsState()
     ScreenScaffold("AI models", onBack) {
+        LocalPredictionSection()
         AiUsageSection()
-        HintText("Choose the model each feature uses. Changes apply to new requests. Swipe matching and learned word frequencies run on your phone.")
+        HintText("Qwen handles word predictions and swipe ranking on your phone. Choose cloud models for the other AI features below.")
         Section("Text suggestions & editing") {
-            AiFeature.entries.filter { it.text }.forEach { feature ->
+            AiFeature.entries.filter { it.text && it != AiFeature.PREDICTION }.forEach { feature ->
                 val choice = settings.aiModels[feature]
                 NavRow(R.drawable.ic_tune, feature.title,
                     "${choice.model} · Reasoning: ${reasoningLabel(choice)}") { editing = feature }
@@ -55,7 +56,7 @@ fun AiModelsScreen(settings: YboardSettings, onBack: () -> Unit) {
             HintText("Creates a transparent sticker from your message. Preview, recreate and send it from the keyboard. Image generation uses your OpenAI key and is billed separately from text.")
             statuses[feature]?.let { HintText(it) }
         }
-        HintText("Next-word predictions default to GPT-6 Luna with reasoning off. Other text models must support the Responses API and structured output. Speech models must support their transcription endpoint.")
+        HintText("Word predictions use local Qwen. Cloud text models are used only for the other features listed here. Speech models must support their transcription endpoint.")
         OutlinedButton(onClick = {
             val key = ApiKeyStore.get(context)
             if (key == null) error = "Add your API key in Voice typing first."

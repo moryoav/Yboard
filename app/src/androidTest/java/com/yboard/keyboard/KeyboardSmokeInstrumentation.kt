@@ -25,13 +25,12 @@ class KeyboardSmokeInstrumentation : Instrumentation() {
         val result = Bundle()
         try {
             val mode = args.getString("mode")
-            if (mode == "prediction_ime") {
+            if (mode == "qwen_core") {
+                result.putString("result", QwenChecks.core(targetContext, args.getString("model")))
+            } else if (mode == "qwen_download") {
+                result.putString("result", QwenChecks.download(targetContext))
+            } else if (mode == "prediction_ime") {
                 result.putString("result", PredictionImeChecks(this).run())
-            } else if (mode == "prediction_local") {
-                result.putString("result", PredictionChecks.local(targetContext) + "; " + PredictionChecks.persistence(this))
-            } else if (mode == "prediction_benchmark") {
-                val models = args.getString("models", "gpt-6-luna,gpt-6.1-terra").split(',').filter { it.isNotBlank() }
-                result.putString("result", PredictionChecks.cloud(targetContext, models, args.getString("repeats", "2").toInt()))
             } else if (mode == "sticker_local") {
                 var text = ""
                 var failure: Throwable? = null
@@ -78,34 +77,13 @@ class KeyboardSmokeInstrumentation : Instrumentation() {
                     android.database.sqlite.SQLiteDatabase.deleteDatabase(path)
                     fixture.delete()
                 }
-            } else if (mode == "ai" || mode == "models") {
-                Prefs.init(targetContext)
+            } else if (mode == "models") {
                 val key = ApiKeyStore.get(targetContext) ?: error("No saved API key")
-                if (mode == "models") {
-                    val models = OpenAi.models(key).filter { id ->
-                        id.contains("nano") || id.contains("mini") || id.contains("luna") || id.contains("transcrib")
-                    }
-                    result.putString("result", "Available models: ${models.joinToString()}")
-                } else {
-                    if (args.getString("enable") == "true") Prefs.update { it.copy(aiPredictions = true) }
-                    val start = SystemClock.elapsedRealtime()
-                    val before = UsageStore.overview(UsagePeriod.MONTH).totals
-                    val words = OpenAi.predictNext(key, "I would like to ", "en", emptyList(), emptyList(), "to")
-                    check(words.isNotEmpty()) { "AI returned no predictions" }
-                    if (args.getString("verify_usage") == "true") {
-                        repeat(30) {
-                            if (UsageStore.overview(UsagePeriod.MONTH).totals.requests <= before.requests) SystemClock.sleep(100)
-                        }
-                        val after = UsageStore.overview(UsagePeriod.MONTH).totals
-                        check(after.input > before.input && after.output > before.output && after.totalCost > before.totalCost) { "Usage or price was not saved" }
-                        result.putString("usage", "Real API token usage and estimated cost saved successfully")
-                    }
-                    result.putString("result", "AI predictions succeeded in ${SystemClock.elapsedRealtime() - start} ms: ${words.joinToString()}")
-                }
-            } else result.putString("result", "No cloud request. Pass -e mode ai or -e mode models to run a diagnostic.")
+                result.putString("result", OpenAi.models(key).joinToString())
+            } else result.putString("result", "No cloud request. Pass -e mode qwen_core for a local prediction diagnostic.")
             finish(Activity.RESULT_OK, result)
         } catch (e: Throwable) {
-            result.putString("error", "${e.javaClass.simpleName}: ${e.message}")
+            result.putString("error", "${e.javaClass.simpleName}: ${e.message}; ${e.stackTrace.firstOrNull { it.className.startsWith("com.yboard") }}")
             finish(Activity.RESULT_CANCELED, result)
         }
     }

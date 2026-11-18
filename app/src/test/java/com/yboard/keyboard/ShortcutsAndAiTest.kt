@@ -4,7 +4,6 @@ import com.yboard.keyboard.settings.YboardSettings
 import com.yboard.keyboard.text.NextWords
 import com.yboard.keyboard.text.Shortcuts
 import com.yboard.keyboard.text.UserWords
-import com.yboard.keyboard.voice.OpenAi
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -33,20 +32,6 @@ class ShortcutsAndAiTest {
         assertEquals(s, YboardSettings.fromJson(s.toJson()))
         assertEquals(Shortcuts.defaults, YboardSettings().shortcuts)
         assertFalse(YboardSettings().aiPredictions)   // AI predictions are opt-in
-    }
-
-    @Test
-    fun aiPredictionRequestAndAnswer() {
-        val json = JSONObject(OpenAi.predictRequestJson("gpt-6-luna", "see you at the ", "en", listOf("Dana"), listOf("love you"), "none"))
-        assertEquals("gpt-6-luna", json.getString("model"))
-        assertEquals(false, json.getBoolean("store"))
-        val user = JSONObject(json.getJSONArray("input").getJSONObject(1).getString("content"))
-        assertEquals("see you at the ", user.getString("text_before_cursor"))
-        assertEquals("Dana", user.getJSONArray("words_they_use_often").getString(0))
-        assertEquals("json_schema", json.getJSONObject("text").getJSONObject("format").getString("type"))
-
-        val answer = """{"next":["beach","park","\"mall\"","the","at the end of the day","!!!","Park"]}"""
-        assertEquals(listOf("beach", "park", "mall"), OpenAi.parsePredictions(answer, lastWord = "the"))
     }
 
     @Test

@@ -6,14 +6,11 @@ import com.yboard.keyboard.ime.YboardIME
 import com.yboard.keyboard.keyboard.KeyDef
 import com.yboard.keyboard.keyboard.KeyType
 import com.yboard.keyboard.settings.Prefs
-import com.yboard.keyboard.text.PredictionCache
-import com.yboard.keyboard.text.PredictionPosition
-import com.yboard.keyboard.text.PredictionStats
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.TimeUnit
+import com.yboard.keyboard.text.Pt
+import com.yboard.keyboard.text.SentenceContext
+import org.json.JSONObject
 
-/** Drives the real service and a separate app's editor, using synthetic cached AI replies. */
+/** Real service, separate app editor and actual local model. Synthetic text only. */
 internal class PredictionImeChecks(private val instrumentation: Instrumentation) {
     private lateinit var ime: YboardIME
     private fun onMain(block: () -> Unit) {
@@ -23,101 +20,102 @@ internal class PredictionImeChecks(private val instrumentation: Instrumentation)
     }
     private fun field(name: String) = YboardIME::class.java.getDeclaredField(name).apply { isAccessible = true }
     @Suppress("UNCHECKED_CAST") private fun slots() = field("slotWords").get(ime) as List<String>
-    private fun refresh() = YboardIME::class.java.getDeclaredMethod("updateSuggestions").apply { isAccessible = true }.invoke(ime)
-    private fun text() = ime.currentInputConnection.getTextBeforeCursor(400, 0).toString()
-    private fun key(letter: String) {
-        onMain { ime.onKey(KeyDef(KeyType.CHAR, letter)) }
-        SystemClock.sleep(180)
+    private fun text() = ime.currentInputConnection.getTextBeforeCursor(SentenceContext.READ_LIMIT, 0).toString()
+    private fun await(label: String, condition: () -> Boolean): Long {
+        val start = SystemClock.elapsedRealtime()
+        while (SystemClock.elapsedRealtime() - start < 20_000) {
+            var passed = false
+            onMain { passed = condition() }
+            if (passed) return SystemClock.elapsedRealtime() - start
+            SystemClock.sleep(25)
+        }
+        var details = ""
+        onMain { details = "text=${text()}; slots=${slots()}; pending=${field("swipePending").get(ime)}; status=${com.yboard.keyboard.local.LocalQwen.status.value}" }
+        error("Timed out: $label; $details")
     }
-    private fun launch(value: String, inputType: Int = 131073, options: Int = 0) {
+    private fun launch(value: String, inputType: Int = 131073, options: Int = 0): Boolean {
         val encoded = java.util.Base64.getEncoder().encodeToString(value.toByteArray(Charsets.UTF_8))
         val command = "am start -W -n com.yboard.keyboard.probe/com.yboard.keyboard.test.EditorProbeActivity -f 0x10008000 --es text64 $encoded --ei inputType $inputType --ei imeOptions $options"
         instrumentation.uiAutomation.executeShellCommand(command).use { fd -> java.io.FileInputStream(fd.fileDescriptor).use { it.readBytes() } }
         SystemClock.sleep(1000)
-        onMain {
-            val type = Class.forName("android.app.ActivityThread")
-            val thread = type.getDeclaredMethod("currentActivityThread").invoke(null)
-            val services = type.getDeclaredField("mServices").apply { isAccessible = true }.get(thread) as Map<*, *>
-            ime = services.values.filterIsInstance<YboardIME>().single()
+        var found = false
+        val deadline = SystemClock.elapsedRealtime() + 5000
+        while (!found && SystemClock.elapsedRealtime() < deadline) {
+            onMain {
+                val type = Class.forName("android.app.ActivityThread")
+                val thread = type.getDeclaredMethod("currentActivityThread").invoke(null)
+                val services = type.getDeclaredField("mServices").apply { isAccessible = true }.get(thread) as Map<*, *>
+                services.values.filterIsInstance<YboardIME>().firstOrNull()?.let { ime = it; found = true }
+            }
+            if (!found) SystemClock.sleep(100)
         }
-        SystemClock.sleep(250)
-        onMain { check(text() == value) { "Probe editor did not contain synthetic fixture" } }
+        // OnePlus routes password fields to its protected system keyboard.
+        if (!found && inputType == 129) return false
+        check(found) { "IME service was not started by the probe editor" }
+        await("synthetic editor connection") { text() == value }
+        return true
     }
-
     fun run(): String {
         Prefs.init(instrumentation.targetContext)
         val saved = Prefs.current
+        val report = JSONObject()
         try {
-            onMain { Prefs.update { it.copy(language = "en", aiPredictions = true, suggestions = true, nextWords = true,
-                learnWords = false, autoCorrect = false, autoCaps = false, emojiSuggest = false) } }
-            PredictionStats.reset()
-            launch("See you ")
+            onMain { Prefs.update { it.copy(language = "en", suggestions = true, nextWords = true,
+                learnWords = false, autoCorrect = true, autoCaps = false, swipeTyping = true) } }
+            launch("See you tom")
+            report.put("completionWaitMs", await("prefix completion") { slots().contains("tomorrow") })
             onMain {
-                (field("aiCache").get(ime) as PredictionCache).put(PredictionPosition("See you ", 8), listOf("tomorrow morning", "later today", "soon"))
-                refresh()
-                check(slots()[1] == "tomorrow")
-                val toolbar = (field("root").get(ime) as com.yboard.keyboard.keyboard.KeyboardRootView).toolbar
-                val pressed = toolbar.javaClass.getDeclaredField("pressedSlot").apply { isAccessible = true }
-                val render = YboardIME::class.java.getDeclaredMethod("renderAiPredictions", PredictionPosition::class.java).apply { isAccessible = true }
-                pressed.setInt(toolbar, 1)
-                (field("aiCache").get(ime) as PredictionCache).put(PredictionPosition("See you ", 8), listOf("later today"))
-                render.invoke(ime, PredictionPosition("See you ", 8))
-                check(slots()[1] == "tomorrow") { "AI moved the suggestion during a touch" }
-                pressed.setInt(toolbar, -1)
-                render.invoke(ime, PredictionPosition("See you ", 8))
-                check(slots()[1] == "later")
-                (field("aiCache").get(ime) as PredictionCache).put(PredictionPosition("See you ", 8), listOf("tomorrow morning", "later today", "soon"))
-                refresh()
+                check(slots().filter { it.isNotEmpty() }.all { it.startsWith("tom", true) })
+                ime.onSuggestion(slots().indexOf("tomorrow"))
             }
-            key("t"); key("o"); key("m")
-            onMain { check(slots().contains("tomorrow")); check(text() == "See you tom") }
-            onMain { ime.onSuggestion(slots().indexOf("tomorrow")) }
-            SystemClock.sleep(200)
-            onMain { check(text() == "See you tomorrow "); check(slots().contains("morning")) }
-            onMain { ime.onSuggestion(slots().indexOf("morning")) }
-            SystemClock.sleep(200)
-            onMain { check(text() == "See you tomorrow morning ") }
-
-            launch("See you ")
-            val jobType = Class.forName("com.yboard.keyboard.ime.YboardIME\$PredictionJob")
-            val job = jobType.getDeclaredConstructor(PredictionPosition::class.java).apply { isAccessible = true }
-                .newInstance(PredictionPosition("See you ", 8))
-            onMain { field("predictionJob").set(ime, job) }
-            key("t")
-            onMain { check(field("predictionJob").get(ime) === job) { "Typing a prefix cancelled a compatible request" } }
-            onMain { ime.onCursorMove(-1) }
-            SystemClock.sleep(200)
-            onMain { check(field("predictionJob").get(ime) == null) }
-
+            await("accepted completion") { text() == "See you tomorrow " }
+            report.put("nextWordWaitMs", await("next word") { slots().any { it.isNotEmpty() } })
+            onMain { ime.onSuggestion(slots().indexOfFirst { it.isNotEmpty() }) }
+            await("second suggestion tap") { text().length > "See you tomorrow ".length }
+            launch("teh")
+            onMain { ime.onKey(KeyDef(KeyType.SPACE, " ")) }
+            await("literal typing") { text() == "teh " }
+            val longSentence = "I remember " + "the conversation about our plans ".repeat(20)
+            launch(longSentence + "tom")
+            onMain {
+                val input = YboardIME::class.java.getDeclaredMethod("localInput").apply { isAccessible = true }.invoke(ime) as SentenceContext.Input
+                check(input.context == longSentence) { "Full sentence was truncated" }
+            }
+            launch("I will be ")
+            val centers = "qwertyuiop".mapIndexed { i, c -> c to Pt(i * 100f, 0f) }.toMap() +
+                "asdfghjkl".mapIndexed { i, c -> c to Pt((i + .5f) * 100, 140f) }.toMap() +
+                "zxcvbnm".mapIndexed { i, c -> c to Pt((i + 1.5f) * 100, 280f) }.toMap()
+            onMain { ime.onSwipeStart(); ime.onSwipe("there".map { centers.getValue(it) }, centers, 100f) }
+            report.put("swipeWaitMs", await("contextual swipe") { text() == "I will be there" })
+            onMain { check(slots().contains("there")) }
+            launch("A new message ")
+            onMain {
+                ime.onSwipe("there".map { centers.getValue(it) }, centers, 100f)
+                ime.onKey(KeyDef(KeyType.CHAR, "x"))
+            }
+            SystemClock.sleep(1000)
+            onMain { check(text() == "A new message x") }
             launch("Private ", options = 0x1000000)
             onMain {
-                val allowed = YboardIME::class.java.getDeclaredMethod("aiAllowed").apply { isAccessible = true }.invoke(ime) as Boolean
-                check(!allowed)
-                check(!(field("learningAllowed").get(ime) as Boolean))
+                val allowed = YboardIME::class.java.getDeclaredMethod("localAllowed").apply { isAccessible = true }.invoke(ime) as Boolean
+                check(!allowed && slots().isEmpty())
             }
-            launch("secret", inputType = 129)
-            onMain { check(slots().isEmpty()); check(!(field("learningAllowed").get(ime) as Boolean)) }
-            launch("A different field ")
+            val ownPassword = launch("secret", inputType = 129)
             onMain {
-                val prior = slots()
-                YboardIME::class.java.getDeclaredMethod("renderAiPredictions", PredictionPosition::class.java)
-                    .apply { isAccessible = true }.invoke(ime, PredictionPosition("See you ", 8))
-                check(slots() == prior)
-                check((field("aiCache").get(ime) as PredictionCache).words(PredictionPosition("See you ", 8)).isEmpty())
+                if (ownPassword) { check(slots().isEmpty()); check(!(field("learningAllowed").get(ime) as Boolean)) }
+                else check(!com.yboard.keyboard.text.EditorPolicy.suggestions(129))
             }
-
-            val release = CountDownLatch(1)
-            val started = CountDownLatch(1)
-            val predicted = CountDownLatch(1)
-            val background = field("aiExecutor").get(ime) as ExecutorService
-            val predictions = field("predictionExecutor").get(ime) as ExecutorService
-            try {
-                background.execute { started.countDown(); release.await(3, TimeUnit.SECONDS) }
-                check(started.await(1, TimeUnit.SECONDS))
-                predictions.execute { predicted.countDown() }
-                check(predicted.await(500, TimeUnit.MILLISECONDS)) { "Prediction worker was blocked by background AI" }
-            } finally { release.countDown() }
-            return "Real IME: prefix completion, consecutive phrase taps, in-flight retention, cursor cancellation, field/password/private guards, touch stability and worker isolation passed; ${PredictionStats.summary()}"
+            if (!ownPassword) {
+                val dump = instrumentation.uiAutomation.executeShellCommand("dumpsys input_method").use { fd ->
+                    java.io.FileInputStream(fd.fileDescriptor).use { it.readBytes().toString(Charsets.UTF_8) }
+                }
+                val current = Regex("mCurId=(\\S+)").find(dump)?.groupValues?.get(1).orEmpty()
+                check(current.isNotEmpty() && !current.startsWith("com.yboard.keyboard/")) { "No replacement password keyboard was active" }
+            }
+            report.put("passwordKeyboard", if (ownPassword) "Yboard guarded" else "OnePlus protected keyboard")
+            launch("Finished ")
+            report.put("passed", "prefix completion, consecutive taps, literal typing, full sentence, Qwen-ranked swipe, cancellation and private/password guards")
+            return report.toString()
         } finally { onMain { Prefs.update { saved } } }
     }
 }

@@ -53,6 +53,7 @@ class KeyboardView(context: Context) : View(context) {
         fun onOneHanded(action: Int)
         /** A swipe-typing gesture finished. */
         fun onSwipe(path: List<Pt>, keyCenters: Map<Char, Pt>, keyWidth: Float) {}
+        fun onSwipeStart() {}
         /** Finger slid left from backspace: select this many words back (0 = none). */
         fun onBackspaceSwipe(words: Int) {}
         /** Finger lifted after sliding on backspace; [apply] = delete the selected words. */
@@ -969,6 +970,7 @@ class KeyboardView(context: Context) : View(context) {
             b.key.type == KeyType.CHAR && hypot(x - p.downX, y - p.downY) > max(dp(26f), letterKeyWidth * 0.7f)
         ) {
             p.gesture = true
+            listener?.onSwipeStart()
             cancelLongPress(p)
             hidePreview()
             pressedBoxes.clear()

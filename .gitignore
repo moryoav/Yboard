@@ -41,3 +41,5 @@ local.properties
 *.sqlite
 *.sqlite3
 *.zip
+*.gguf
+__pycache__/
