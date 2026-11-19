@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.9.3
+
+- Added optional update notifications under About. Yboard checks for new releases in the background roughly every three days and shows one alert per version.
+- Opened the in-app updater when an update notification is tapped.
+
 ## 1.9.2
 
 - Fixed commas and periods after tapping a suggestion for a typed or swiped word. Punctuation now replaces the space added by autocomplete.

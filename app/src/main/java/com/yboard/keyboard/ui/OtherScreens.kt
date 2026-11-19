@@ -210,7 +210,7 @@ fun LanguagesScreen(settings: YboardSettings, onBack: () -> Unit) {
 }
 
 @Composable
-fun AboutScreen(onBack: () -> Unit) {
+fun AboutScreen(onBack: () -> Unit, updateCheckRequested: Boolean, onUpdateCheckHandled: () -> Unit) {
     val context = LocalContext.current
     val version = remember {
         try { context.packageManager.getPackageInfo(context.packageName, 0).versionName } catch (e: Exception) { null } ?: "1.1"
@@ -225,7 +225,7 @@ fun AboutScreen(onBack: () -> Unit) {
             Text("Yboard", style = MaterialTheme.typography.headlineMedium)
             Text("Version $version", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        UpdatesSection()
+        UpdatesSection(updateCheckRequested, onUpdateCheckHandled)
         Section("Privacy") {
             Text(
                 "Everything you type with the keys, your clipboard history, learned words and themes stay on this phone. " +

@@ -65,6 +65,7 @@ class MainActivity : ComponentActivity() {
         Prefs.init(this)
         enableEdgeToEdge()
         openRequest.value = intent?.getStringExtra(EXTRA_OPEN)
+        intent?.removeExtra(EXTRA_OPEN)
         setContent {
             YboardTheme {
                 YboardSettingsApp(openRequest)
@@ -75,12 +76,15 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         intent.getStringExtra(EXTRA_OPEN)?.let { openRequest.value = it }
+        intent.removeExtra(EXTRA_OPEN)
+        setIntent(intent)
     }
 
     companion object {
         const val EXTRA_OPEN = "open"
         const val OPEN_VOICE = "voice"
         const val OPEN_ABOUT = "about"
+        const val OPEN_UPDATES = "updates"
         const val OPEN_AI_MODELS = "ai_models"
         const val OPEN_TYPING = "typing"
     }
@@ -102,6 +106,7 @@ fun YboardSettingsApp(openRequest: MutableState<String?> = mutableStateOf(null))
     var side by remember { mutableFloatStateOf(1f) }
     var moving by remember { mutableStateOf(false) }
     var searchTarget by remember { mutableStateOf<String?>(null) }
+    var updateCheckRequested by rememberSaveable { mutableStateOf(false) }
 
     fun open(s: Screen, target: String? = null) {
         if (moving || top == s) return
@@ -163,8 +168,12 @@ fun YboardSettingsApp(openRequest: MutableState<String?> = mutableStateOf(null))
             stackNames = listOf(Screen.HOME.name, Screen.AI_MODELS.name)
             openRequest.value = null
         }
-        if (request == MainActivity.OPEN_ABOUT) {
+        if (request == MainActivity.OPEN_ABOUT || request == MainActivity.OPEN_UPDATES) {
             stackNames = listOf(Screen.HOME.name, Screen.ABOUT.name)
+            if (request == MainActivity.OPEN_UPDATES) {
+                searchTarget = "Updates"
+                updateCheckRequested = true
+            }
             openRequest.value = null
         }
         if (request == MainActivity.OPEN_VOICE) {
@@ -189,7 +198,10 @@ fun YboardSettingsApp(openRequest: MutableState<String?> = mutableStateOf(null))
             Screen.LANGUAGES -> LanguagesScreen(settings, onBack = ::back)
             Screen.VOICE -> VoiceScreen(settings, onBack = ::back)
             Screen.AI_MODELS -> AiModelsScreen(settings, onBack = ::back)
-            Screen.ABOUT -> AboutScreen(onBack = ::back)
+            Screen.ABOUT -> AboutScreen(
+                onBack = ::back, updateCheckRequested = updateCheckRequested,
+                onUpdateCheckHandled = { updateCheckRequested = false },
+            )
         }
     }
 

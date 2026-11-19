@@ -1,5 +1,6 @@
 package com.yboard.keyboard.ui
 
+import android.Manifest
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
@@ -11,11 +12,16 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.yboard.keyboard.update.AppUpdater
+import com.yboard.keyboard.update.UpdateNotifications
 import com.yboard.keyboard.update.UpdateRelease
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -23,10 +29,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
-fun UpdatesSection() {
+fun UpdatesSection(updateCheckRequested: Boolean, onUpdateCheckHandled: () -> Unit) {
     val context = LocalContext.current
     val updater = remember { AppUpdater(context.applicationContext) }
-    val installedCode = remember { AppUpdater.versionCode(context.packageManager.getPackageInfo(context.packageName, 0)) }
+    val installedCode = remember { AppUpdater.installedVersionCode(context) }
     val scope = rememberCoroutineScope()
     var releaseJson by rememberSaveable { mutableStateOf<String?>(null) }
     var checked by rememberSaveable { mutableStateOf(false) }
@@ -71,6 +77,29 @@ fun UpdatesSection() {
         }
     }
 
+    fun checkForUpdates() {
+        if (busy != null) return
+        busy = "Checking for updates…"
+        error = null
+        scope.launch {
+            try {
+                val latest = withContext(Dispatchers.IO) { updater.check() }
+                releaseJson = latest?.toJson()
+                checked = true
+                downloadedCode = null
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { error = AppUpdater.friendly(e) }
+            finally { busy = null }
+        }
+    }
+
+    LaunchedEffect(updateCheckRequested) {
+        if (updateCheckRequested) {
+            checkForUpdates()
+            onUpdateCheckHandled()
+        }
+    }
+
     Section("Updates", searchable = true) {
         Column(Modifier.padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             val newer = release?.isNewerThan(installedCode) == true
@@ -111,26 +140,48 @@ fun UpdatesSection() {
                     }
                 }, enabled = busy == null) { Text(if (ready) "Install update" else "Download and install") }
             }
-            OutlinedButton(onClick = {
-                scope.launch {
-                    busy = "Checking for updates…"
-                    error = null
-                    try {
-                        val latest = withContext(Dispatchers.IO) { updater.check() }
-                        releaseJson = latest?.toJson()
-                        checked = true
-                        downloadedCode = null
-                    } catch (e: CancellationException) { throw e }
-                    catch (e: Exception) { error = AppUpdater.friendly(e) }
-                    finally { busy = null }
-                }
-            }, enabled = busy == null) { Text("Check for updates") }
+            OutlinedButton(onClick = ::checkForUpdates, enabled = busy == null) { Text("Check for updates") }
             TextButton(onClick = {
                 runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(UpdateRelease.RELEASES_URL))) }
                     .onFailure { error = "No browser is available to open GitHub." }
             }) { Text("View releases on GitHub") }
             Text("Android asks you to approve installation. Your settings, words and saved API key are kept.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        RowDivider()
+        UpdateNotificationControls()
+    }
+}
+
+@Composable
+private fun UpdateNotificationControls() {
+    val context = LocalContext.current
+    val preview = LocalInspectionMode.current
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    var enabled by remember { mutableStateOf(!preview && UpdateNotifications.canNotify(context)) }
+    var useSettings by rememberSaveable { mutableStateOf(false) }
+    val requestPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        enabled = UpdateNotifications.canNotify(context)
+        useSettings = !granted
+    }
+    DisposableEffect(lifecycle) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (!preview && event == Lifecycle.Event.ON_RESUME) enabled = UpdateNotifications.canNotify(context)
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
+    Column(Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
+        Text(if (enabled) "Update notifications are on." else "Get a notification when a new version is available.",
+            style = MaterialTheme.typography.bodyMedium)
+        TextButton(onClick = {
+            if (!useSettings && UpdateNotifications.needsPermission(context)) {
+                requestPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+            } else {
+                context.startActivity(UpdateNotifications.settingsIntent(context))
+            }
+        }) {
+            Text(if (enabled || useSettings) "Update notification settings" else "Enable update notifications")
         }
     }
 }

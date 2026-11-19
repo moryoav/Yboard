@@ -2,6 +2,8 @@ package com.yboard.keyboard
 
 import android.app.Application
 import com.yboard.keyboard.settings.Prefs
+import com.yboard.keyboard.update.UpdateCheckJob
+import com.yboard.keyboard.update.UpdateNotifications
 import com.yboard.keyboard.usage.UsageStore
 
 class YboardApp : Application() {
@@ -10,6 +12,8 @@ class YboardApp : Application() {
         Prefs.init(this)
         UsageStore.init(this)
         com.yboard.keyboard.local.QwenModel.init(this)
+        UpdateNotifications.initialize(this)
+        UpdateCheckJob.schedule(this)
     }
 
     override fun onTrimMemory(level: Int) {

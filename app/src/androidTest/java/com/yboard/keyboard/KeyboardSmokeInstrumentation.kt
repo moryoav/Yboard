@@ -31,6 +31,8 @@ class KeyboardSmokeInstrumentation : Instrumentation() {
                 result.putString("result", QwenChecks.download(targetContext))
             } else if (mode == "prediction_ime") {
                 result.putString("result", PredictionImeChecks(this).run())
+            } else if (mode == "update_notifications") {
+                result.putString("result", UpdateNotificationChecks(this).run(args.getString("scenario").orEmpty()))
             } else if (mode == "sticker_local") {
                 var text = ""
                 var failure: Throwable? = null
