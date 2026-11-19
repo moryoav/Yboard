@@ -2,9 +2,12 @@ package com.yboard.keyboard
 
 import android.app.Instrumentation
 import android.os.SystemClock
+import android.view.MotionEvent
 import com.yboard.keyboard.ime.YboardIME
 import com.yboard.keyboard.keyboard.KeyDef
 import com.yboard.keyboard.keyboard.KeyType
+import com.yboard.keyboard.keyboard.KeyboardRootView
+import com.yboard.keyboard.keyboard.KeyboardView
 import com.yboard.keyboard.settings.Prefs
 import com.yboard.keyboard.text.Pt
 import com.yboard.keyboard.text.SentenceContext
@@ -20,17 +23,31 @@ internal class PredictionImeChecks(private val instrumentation: Instrumentation)
     }
     private fun field(name: String) = YboardIME::class.java.getDeclaredField(name).apply { isAccessible = true }
     @Suppress("UNCHECKED_CAST") private fun slots() = field("slotWords").get(ime) as List<String>
-    private fun text() = ime.currentInputConnection.getTextBeforeCursor(SentenceContext.READ_LIMIT, 0).toString()
-    private fun await(label: String, condition: () -> Boolean): Long {
+    private fun pendingSwipes() = (field("pendingSwipes").get(ime) as Collection<*>).size
+    private fun text() = ime.currentInputConnection?.getTextBeforeCursor(SentenceContext.READ_LIMIT, 0)?.toString().orEmpty()
+    private fun touchGlide(word: String) {
+        val keyboard = (field("root").get(ime) as KeyboardRootView).keyboard
+        val method = KeyboardView::class.java.getDeclaredMethod("keyCenters").apply { isAccessible = true }
+        @Suppress("UNCHECKED_CAST") val centers = method.invoke(keyboard) as Map<Char, Pt>
+        val started = SystemClock.uptimeMillis()
+        fun send(action: Int, point: Pt) {
+            val event = MotionEvent.obtain(started, SystemClock.uptimeMillis(), action, point.x, point.y, 0)
+            try { check(keyboard.onTouchEvent(event)) } finally { event.recycle() }
+        }
+        send(MotionEvent.ACTION_DOWN, centers.getValue(word.first()))
+        word.drop(1).forEach { send(MotionEvent.ACTION_MOVE, centers.getValue(it)) }
+        send(MotionEvent.ACTION_UP, centers.getValue(word.last()))
+    }
+    private fun await(label: String, timeoutMs: Long = 20_000, condition: () -> Boolean): Long {
         val start = SystemClock.elapsedRealtime()
-        while (SystemClock.elapsedRealtime() - start < 20_000) {
+        while (SystemClock.elapsedRealtime() - start < timeoutMs) {
             var passed = false
             onMain { passed = condition() }
             if (passed) return SystemClock.elapsedRealtime() - start
             SystemClock.sleep(25)
         }
         var details = ""
-        onMain { details = "text=${text()}; slots=${slots()}; pending=${field("swipePending").get(ime)}; status=${com.yboard.keyboard.local.LocalQwen.status.value}" }
+        onMain { details = "text=${text()}; slots=${slots()}; pending=${pendingSwipes()}; status=${com.yboard.keyboard.local.LocalQwen.status.value}" }
         error("Timed out: $label; $details")
     }
     private fun launch(value: String, inputType: Int = 131073, options: Int = 0): Boolean {
@@ -45,7 +62,8 @@ internal class PredictionImeChecks(private val instrumentation: Instrumentation)
                 val type = Class.forName("android.app.ActivityThread")
                 val thread = type.getDeclaredMethod("currentActivityThread").invoke(null)
                 val services = type.getDeclaredField("mServices").apply { isAccessible = true }.get(thread) as Map<*, *>
-                services.values.filterIsInstance<YboardIME>().firstOrNull()?.let { ime = it; found = true }
+                services.values.filterIsInstance<YboardIME>().firstOrNull { it.isInputViewShown && it.currentInputConnection != null }
+                    ?.let { ime = it; found = true }
             }
             if (!found) SystemClock.sleep(100)
         }
@@ -85,9 +103,34 @@ internal class PredictionImeChecks(private val instrumentation: Instrumentation)
             val centers = "qwertyuiop".mapIndexed { i, c -> c to Pt(i * 100f, 0f) }.toMap() +
                 "asdfghjkl".mapIndexed { i, c -> c to Pt((i + .5f) * 100, 140f) }.toMap() +
                 "zxcvbnm".mapIndexed { i, c -> c to Pt((i + 1.5f) * 100, 280f) }.toMap()
-            onMain { ime.onSwipeStart(); ime.onSwipe("there".map { centers.getValue(it) }, centers, 100f) }
+            fun glide(word: String) {
+                ime.onSwipeStart()
+                ime.onSwipe(word.map { centers.getValue(it) }, centers, 100f)
+            }
+            onMain { glide("there") }
             report.put("swipeWaitMs", await("contextual swipe") { text() == "I will be there" })
             onMain { check(slots().contains("there")) }
+            launch("I will be ")
+            onMain {
+                touchGlide("there")
+                touchGlide("again")
+                touchGlide("tomorrow")
+                check(pendingSwipes() == 3) { "All three released gestures should be queued" }
+                check(text() == "I will be ")
+            }
+            report.put("queuedSwipeWaitMs", await("three swipes in order", timeoutMs = 60_000) {
+                text() == "I will be there again tomorrow"
+            })
+            onMain { check(slots().contains("tomorrow")) }
+            launch("Move the cursor ")
+            onMain {
+                glide("there")
+                glide("again")
+                check(pendingSwipes() == 2)
+                ime.currentInputConnection.setSelection(4, 4)
+            }
+            await("swipes discarded after cursor move") { pendingSwipes() == 0 }
+            onMain { check(text() == "Move" && ime.currentInputConnection.getTextAfterCursor(80, 0).toString() == " the cursor ") }
             launch("A new message ")
             onMain {
                 ime.onSwipe("there".map { centers.getValue(it) }, centers, 100f)
@@ -114,7 +157,7 @@ internal class PredictionImeChecks(private val instrumentation: Instrumentation)
             }
             report.put("passwordKeyboard", if (ownPassword) "Yboard guarded" else "OnePlus protected keyboard")
             launch("Finished ")
-            report.put("passed", "prefix completion, consecutive taps, literal typing, full sentence, Qwen-ranked swipe, cancellation and private/password guards")
+            report.put("passed", "prefix completion, consecutive taps, literal typing, full sentence, Qwen-ranked swipes, ordered glide queue, cursor and tap cancellation, private/password guards")
             return report.toString()
         } finally { onMain { Prefs.update { saved } } }
     }

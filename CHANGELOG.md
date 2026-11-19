@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.9.1
+
+- Queued consecutive glides so you can swipe the next word immediately. Recognized words appear in the order you swiped them.
+
 ## 1.7.4
 
 - Added daily quiet hours under Sound & vibration, with start and end times and separate sound and vibration controls.

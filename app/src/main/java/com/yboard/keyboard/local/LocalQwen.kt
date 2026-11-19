@@ -6,6 +6,7 @@ import android.os.Looper
 import android.os.SystemClock
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.util.concurrent.CancellationException
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
@@ -20,6 +21,7 @@ object LocalQwen {
     private val worker = ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS, LinkedBlockingQueue(1),
         { task -> Thread(task, "YboardQwen") }, ThreadPoolExecutor.DiscardOldestPolicy())
     @Volatile private var ticket = 0L
+    private var onRankCancelled: (() -> Unit)? = null
     private var handle = 0L // worker thread only
     @Volatile private var clearPending = false
     @Volatile private var releasePending = false
@@ -28,6 +30,8 @@ object LocalQwen {
     @Synchronized fun cancel(): Long {
         ticket = try { QwenNative.cancel() } catch (_: LinkageError) { ticket + 1 }
         worker.queue.clear()
+        onRankCancelled?.let { main.post { it() } }
+        onRankCancelled = null
         return ticket
     }
     private fun ensureLoaded() {
@@ -99,15 +103,20 @@ object LocalQwen {
         return id
     }
 
-    fun rank(context: String, words: List<String>, callback: (kotlin.Result<DoubleArray>) -> Unit): Long {
+    @Synchronized fun rank(context: String, words: List<String>, callback: (kotlin.Result<DoubleArray>) -> Unit): Long {
         val id = cancel()
+        onRankCancelled = { callback(kotlin.Result.failure(CancellationException())) }
         worker.execute {
             if (id != ticket) return@execute
             val result = runCatching { ensureLoaded(); QwenNative.score(handle, context, words.toTypedArray(), id) }
-            main.post { if (id == ticket) {
+            main.post {
+                synchronized(this) {
+                    if (id != ticket) return@post
+                    onRankCancelled = null
+                }
                 mutable.value = Status(loaded = handle != 0L, error = result.exceptionOrNull()?.message)
                 callback(result)
-            } }
+            }
         }
         return id
     }

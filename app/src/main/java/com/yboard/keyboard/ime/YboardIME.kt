@@ -128,6 +128,8 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
 
     private class SwipeCommit(val word: String, val alternatives: List<String>, val before: String)
     private var lastSwipe: SwipeCommit? = null
+    private val pendingSwipes = ArrayDeque<List<SwipeDecoder.Candidate>>()
+    private val swipePending get() = pendingSwipes.isNotEmpty()
 
     // Backspace slide-to-delete-words.
     private var bsOrigin = -1
@@ -548,7 +550,6 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     private var suggestionText: String? = null
     private var modelNote = false
     private var modelNoteAction = false
-    private var swipePending = false
     private val modelListener: () -> Unit = {
         main.post { failedInput = null; updateSuggestions() }
     }
@@ -558,7 +559,10 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         localPending?.let { main.removeCallbacks(it) }
         localPending = null
         qwenRequested = null
-        swipePending = false
+        if (swipePending) {
+            pendingSwipes.clear()
+            clearStrip()
+        }
         LocalQwen.cancel()
     }
 
@@ -682,6 +686,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
 
     private fun updateSuggestions() {
         if (!predictionFieldActive) { clearStrip(); return }
+        if (swipePending) return
         val started = SystemClock.elapsedRealtime()
         try {
             if (suggestionsAllowed && settings.suggestions && voice?.isActive != true && emojiSearchBar == null && selStart == selEnd)
@@ -697,7 +702,6 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         if (voice?.isActive == true || sprinkleNote()) { cancelAiPredictions(); return }
         if (emailLayout() && emojiSearchBar == null && selStart == selEnd) { cancelAiPredictions(); showEmailChips(); return }
         if (!settings.suggestions || !localAllowed()) { cancelAiPredictions(); clearStrip(); return }
-        if (swipePending) return
         if (swipeWordBeforeCursor()) {
             val swipe = lastSwipe!!
             val alternatives = swipe.alternatives.filter { it != swipe.word }
@@ -984,35 +988,82 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     // --------------------------------------------------------- swipe typing
 
     override fun onSwipeStart() {
-        if (!localAllowed() || !QwenModel.state.value.ready) return
+        if (swipePending || !localAllowed() || !QwenModel.state.value.ready) return
         val input = localInput() ?: return
         LocalQwen.prepare(input.context + input.prefix)
     }
 
     override fun onSwipe(path: List<Pt>, keyCenters: Map<Char, Pt>, keyWidth: Float) {
         endVoice()
-        cancelAiPredictions()
         if (!settings.swipeTyping || !localAllowed() || editorInfo?.let { EditorPolicy.glide(it.inputType) } != true) return
         if (!QwenModel.state.value.ready) { showModelNote("Download Qwen"); return }
         val decoder = decoder ?: return
-        val ic = currentInputConnection ?: return
-        if (localInput() == null) { showModelNote("Sentence too long"); return }
-        val before = ic.getTextBeforeCursor(SentenceContext.READ_LIMIT, 0)?.toString() ?: return
-        val input = SentenceContext.capture(before + if (before.lastOrNull()?.isWhitespace() == false) " " else "", selEnd)
         val candidates = decoder.decodeScored(path, keyCenters, keyWidth, 24, includeFrequency = false)
         if (candidates.isEmpty()) return
-        val round = localRound
-        val cursor = selEnd
-        val casing = shift
-        swipePending = true
+        if (swipePending) {
+            pendingSwipes.addLast(candidates)
+            return
+        }
+        cancelAiPredictions()
+        pendingSwipes.addLast(candidates)
         showModelNote("Reading swipe…")
-        LocalQwen.rank(input.context, candidates.map { it.word }) { result ->
-            if (round != localRound || !localAllowed()) return@rank
-            swipePending = false
-            val connection = currentInputConnection ?: return@rank
-            if (selEnd != cursor || connection.getTextBeforeCursor(SentenceContext.READ_LIMIT, 0)?.toString() != before) return@rank
+        recognizeNextSwipe()
+    }
+
+    private data class SwipeTarget(val before: String, val after: String?, val cursor: Int?)
+
+    private fun swipeTarget(connection: InputConnection): SwipeTarget? {
+        val limit = SentenceContext.READ_LIMIT
+        if (Build.VERSION.SDK_INT >= 31) {
+            connection.getSurroundingText(limit, 32, 0)?.let { text ->
+                if (text.selectionStart != text.selectionEnd) return null
+                return SwipeTarget(
+                    text.text.subSequence(0, text.selectionStart).toString(),
+                    text.text.subSequence(text.selectionEnd, text.text.length).toString(),
+                    text.offset.takeIf { it >= 0 }?.plus(text.selectionStart),
+                )
+            }
+        }
+        if (!connection.getSelectedText(0).isNullOrEmpty()) return null
+        val before = connection.getTextBeforeCursor(limit, 0)?.toString() ?: return null
+        return SwipeTarget(before, connection.getTextAfterCursor(32, 0)?.toString(), null)
+    }
+
+    private fun recognizeNextSwipe() {
+        val candidates = pendingSwipes.first()
+        val connection = currentInputConnection
+        val target = connection?.let(::swipeTarget)
+        if (connection == null || target == null || !localAllowed()) {
+            cancelAiPredictions()
+            updateSuggestions()
+            return
+        }
+        val before = target.before
+        val cursor = target.cursor ?: selEnd
+        val input = SentenceContext.capture(before, cursor)
+        if (before.length >= SentenceContext.READ_LIMIT && cursor > before.length &&
+            input.context.length >= before.length - input.prefix.length) {
+            cancelAiPredictions()
+            showModelNote("Sentence too long")
+            return
+        }
+        val context = if (before.lastOrNull()?.isWhitespace() == false)
+            SentenceContext.capture("$before ", cursor + 1).context else input.context
+        val round = localRound
+        val casing = shift
+        LocalQwen.rank(context, candidates.map { it.word }) { result ->
+            if (round != localRound) return@rank
+            if (currentInputConnection !== connection || !localAllowed() || swipeTarget(connection) != target) {
+                cancelAiPredictions()
+                updateSuggestions()
+                return@rank
+            }
+            pendingSwipes.removeFirst()
             val ranked = result.getOrNull()?.let { GlideRanking.rank(candidates, it) }.orEmpty()
-            if (ranked.isEmpty()) { showModelNote("Qwen unavailable"); return@rank }
+            if (ranked.isEmpty()) {
+                if (swipePending) recognizeNextSwipe() else showModelNote("Qwen unavailable")
+                return@rank
+            }
             fun cased(word: String) = when (casing) {
                 ShiftState.LOCKED -> word.uppercase()
                 ShiftState.ON -> word.replaceFirstChar { it.uppercaseChar() }
@@ -1023,16 +1074,23 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
             acceptSwipe()
             lastAutoCorrect = null
             val needSpace = before.isNotEmpty() && (before.last().isLetterOrDigit() || before.last() in ".,!?:;")
-            connection.beginBatchEdit()
-            if (needSpace) connection.commitText(" ", 1)
-            connection.commitText(word, 1)
-            connection.endBatchEdit()
+            if (!connection.commitText(if (needSpace) " $word" else word, 1)) {
+                cancelAiPredictions()
+                updateSuggestions()
+                return@rank
+            }
             if (shift == ShiftState.ON) setShift(ShiftState.OFF)
             lastSwipe = SwipeCommit(word, alternatives, before)
             lastSpaceTime = 0
             currentWord = ""
-            val others = alternatives.drop(1)
-            showStrip(listOf(others.getOrElse(0) { "" }, word, others.getOrElse(1) { "" }), 1)
+            if (swipePending) {
+                // Read the updated editor so the next word is ranked with this word as context.
+                updateAutoShift()
+                recognizeNextSwipe()
+            } else {
+                val others = alternatives.drop(1)
+                showStrip(listOf(others.getOrElse(0) { "" }, word, others.getOrElse(1) { "" }), 1)
+            }
         }
     }
 
@@ -1040,6 +1098,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
 
     override fun onBackspaceSwipe(words: Int) {
         endVoice()
+        if (swipePending) cancelAiPredictions()
         val ic = currentInputConnection ?: return
         if (bsOrigin < 0) {
             if (selStart < 0 || selStart != selEnd) return
@@ -1147,6 +1206,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
 
     override fun onToolbar(action: ToolbarView.Action) {
         val r = root ?: return
+        if (swipePending) cancelAiPredictions()
         if (action != ToolbarView.Action.STICKER) closeSticker()
         if (action == ToolbarView.Action.MIC) {
             toggleVoice()
@@ -1480,6 +1540,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
 
     private fun openEmoji() {
         val r = root ?: return
+        if (swipePending) cancelAiPredictions()
         r.showPanel(EmojiPanel(
             this,
             onEmoji = { e -> lastSwipe = null; currentInputConnection?.commitText(e, 1) },
