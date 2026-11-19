@@ -141,6 +141,18 @@ object VoiceRegression {
             check(f.fileCalls == 1 && f.text() == "Recovered final words." && !f.voice.isActive)
         })
         scenario({ f ->
+            f.phrase(); f.finish("list", "I bought milk , bread, and eggs .")
+            check(f.text() == "I bought milk, bread, and eggs.")
+            f.phrase(); f.finish("continuation", "Before I left")
+            f.phrase(); f.finish("comma", "comma")
+            check(f.text() == "I bought milk, bread, and eggs. Before I left,")
+        })
+        scenario({ f ->
+            f.phrase(); f.results.add("אם ירד גשם , אשאר בבית .")
+            f.voice.onClosed("offline", 0); f.clock.advance()
+            check(f.fileCalls == 1 && f.text() == "אם ירד גשם, אשאר בבית.")
+        }, smart = false)
+        scenario({ f ->
             f.phrase(); f.voice.onCommitted("one"); f.voice.onDelta("one", "First")
             f.phrase(); f.voice.onCommitted("two"); f.voice.onCompleted("two", "Second.")
             f.results.add("First recovered.")

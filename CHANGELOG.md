@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.9.2
+
+- Fixed commas and periods after tapping a suggestion for a typed or swiped word. Punctuation now replaces the space added by autocomplete.
+- Improved automatic punctuation in English and Hebrew voice typing for both live and recorded transcription.
+
 ## 1.9.1
 
 - Queued consecutive glides so you can swipe the next word immediately. Recognized words appear in the order you swiped them.

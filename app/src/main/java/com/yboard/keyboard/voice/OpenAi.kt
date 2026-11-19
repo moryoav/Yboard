@@ -33,10 +33,14 @@ object OpenAi {
     private const val TAG = "YboardVoice"
 
     private const val SPEECH_PROMPT =
-        "Dictation typed on a phone keyboard. The speaker speaks only English and Hebrew: write only in English " +
-            "or Hebrew, never in any other language or alphabet. Use normal punctuation. " +
-            "The speaker may also say editing commands such as new line, delete that, scratch that, send, " +
-            "question mark, comma, period; write those as the words."
+        "Verbatim phone dictation in English and Hebrew, never in any other language. Automatically punctuate the transcript, even " +
+            "when the speaker does not say the punctuation aloud. Use commas for lists and clause boundaries, " +
+            "periods at the end of complete statements, and question marks after questions. " +
+            "A pause inside an unfinished sentence does not end it. Follow this style: " +
+            "If it rains, I'll stay home. I bought milk, bread, and eggs. Are you coming? " +
+            "אם ירד גשם, אשאר בבית. קניתי חלב, לחם וביצים. אתה מגיע? " +
+            "Keep spoken editing commands and punctuation names as words, such as new line, delete that, " +
+            "scratch that, send, question mark, comma, and period."
 
     /** Command words the speech model should expect, so "new line" isn't heard as "no line". */
     val SPEECH_KEYWORDS = listOf(

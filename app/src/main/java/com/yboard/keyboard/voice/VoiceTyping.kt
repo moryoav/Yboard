@@ -449,7 +449,8 @@ class VoiceTyping(
         return null
     }
 
-    private fun handlePhrase(spoken: String) {
+    private fun handlePhrase(heard: String) {
+        val spoken = VoiceEdits.attachPunctuation(heard)
         val n = ++phraseCount
         val before = text.toString()
         if (!smartCommands) {

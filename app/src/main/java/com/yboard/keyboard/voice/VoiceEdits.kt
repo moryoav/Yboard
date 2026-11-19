@@ -29,6 +29,11 @@ object VoiceEdits {
     }
 
     private val noSpaceBefore = setOf('.', ',', '!', '?', ';', ':', ')', ']', '}', '%', '…', '\n', '"', '\'', '״', '׳')
+    private val spaceBeforePunctuation = Regex("(?<=\\S)[ \\t]+([,.!?;:])")
+
+    fun attachPunctuation(transcript: String): String =
+        transcript.replace(spaceBeforePunctuation, "$1")
+
     private val lowerAfterPause = setOf(
         "and", "but", "or", "so", "then", "the", "a", "an", "to", "of", "in", "on", "at", "for", "with",
         "because", "that", "this", "it", "is", "was", "we", "you", "he", "she", "they", "my", "your",

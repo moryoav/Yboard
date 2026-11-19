@@ -80,7 +80,8 @@ internal class PredictionImeChecks(private val instrumentation: Instrumentation)
         try {
             onMain { Prefs.update { it.copy(language = "en", suggestions = true, nextWords = true,
                 learnWords = false, autoCorrect = true, autoCaps = false, swipeTyping = true) } }
-            launch("See you tom")
+            launch("See you to")
+            onMain { ime.onKey(KeyDef(KeyType.CHAR, "m")) }
             report.put("completionWaitMs", await("prefix completion") { slots().contains("tomorrow") })
             onMain {
                 check(slots().filter { it.isNotEmpty() }.all { it.startsWith("tom", true) })
@@ -90,6 +91,28 @@ internal class PredictionImeChecks(private val instrumentation: Instrumentation)
             report.put("nextWordWaitMs", await("next word") { slots().any { it.isNotEmpty() } })
             onMain { ime.onSuggestion(slots().indexOfFirst { it.isNotEmpty() }) }
             await("second suggestion tap") { text().length > "See you tomorrow ".length }
+            onMain {
+                val expected = text().dropLast(1) + "."
+                ime.onKey(KeyDef(KeyType.PERIOD, "."))
+                check(text() == expected)
+            }
+            launch("See you tom")
+            await("prefix completion for comma") { slots().contains("tomorrow") }
+            onMain {
+                ime.onSuggestion(slots().indexOf("tomorrow"))
+                ime.onKey(KeyDef(KeyType.COMMA, ","))
+                check(text() == "See you tomorrow,")
+            }
+            launch("See you tom")
+            await("prefix completion before cursor move") { slots().contains("tomorrow") }
+            onMain { ime.onSuggestion(slots().indexOf("tomorrow")) }
+            await("accepted completion before cursor move") { text() == "See you tomorrow " }
+            onMain {
+                ime.currentInputConnection.setSelection(4, 4)
+                ime.onKey(KeyDef(KeyType.COMMA, ","))
+                check(text() == "See ,")
+                check(ime.currentInputConnection.getTextAfterCursor(80, 0).toString() == "you tomorrow ")
+            }
             launch("teh")
             onMain { ime.onKey(KeyDef(KeyType.SPACE, " ")) }
             await("literal typing") { text() == "teh " }
@@ -108,8 +131,15 @@ internal class PredictionImeChecks(private val instrumentation: Instrumentation)
                 ime.onSwipe(word.map { centers.getValue(it) }, centers, 100f)
             }
             onMain { glide("there") }
-            report.put("swipeWaitMs", await("contextual swipe") { text() == "I will be there" })
-            onMain { check(slots().contains("there")) }
+            report.put("swipeWaitMs", await("contextual swipe") {
+                text() == "I will be there" && slots().contains("there") && field("stripCursor").getInt(ime) == text().length
+            })
+            onMain { ime.onSuggestion(slots().indexOf("there")) }
+            await("accepted swipe") { text() == "I will be there " }
+            onMain {
+                ime.onKey(KeyDef(KeyType.PERIOD, "."))
+                check(text() == "I will be there.")
+            }
             launch("I will be ")
             onMain {
                 touchGlide("there")
@@ -157,7 +187,7 @@ internal class PredictionImeChecks(private val instrumentation: Instrumentation)
             }
             report.put("passwordKeyboard", if (ownPassword) "Yboard guarded" else "OnePlus protected keyboard")
             launch("Finished ")
-            report.put("passed", "prefix completion, consecutive taps, literal typing, full sentence, Qwen-ranked swipes, ordered glide queue, cursor and tap cancellation, private/password guards")
+            report.put("passed", "prefix completion, consecutive taps, punctuation after suggestions, literal spaces at a moved cursor, full sentence, Qwen-ranked swipes, ordered glide queue, cursor and tap cancellation, private/password guards")
             return report.toString()
         } finally { onMain { Prefs.update { saved } } }
     }
