@@ -11,6 +11,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.Settings
+import android.util.Log
 import com.yboard.keyboard.R
 import com.yboard.keyboard.ui.MainActivity
 
@@ -46,8 +47,9 @@ object UpdateNotifications {
             .putExtra(Settings.EXTRA_CHANNEL_ID, CHANNEL_ID)
     }
 
-    /** Called on the main thread after the updater validates the public release. */
+    /** Called off the main thread after the updater validates the public release. */
     @SuppressLint("MissingPermission")
+    @Synchronized
     fun showIfNewer(context: Context, release: UpdateRelease) {
         if (!release.isNewerThan(AppUpdater.installedVersionCode(context)) || !canNotify(context)) return
         val preferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -66,6 +68,8 @@ object UpdateNotifications {
             .setOnlyAlertOnce(true)
             .build()
         context.getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification)
-        preferences.edit().putLong(LAST_VERSION, release.versionCode).apply()
+        if (!preferences.edit().putLong(LAST_VERSION, release.versionCode).commit()) {
+            Log.w("YboardUpdates", "Could not save the last notified version")
+        }
     }
 }

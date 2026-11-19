@@ -29,9 +29,7 @@ internal class UpdateNotificationChecks(private val instrumentation: Instrumenta
     private fun posted() =
         manager.activeNotifications.firstOrNull { it.id == UpdateNotifications.NOTIFICATION_ID }?.notification
 
-    private fun show(info: UpdateRelease) {
-        instrumentation.runOnMainSync { UpdateNotifications.showIfNewer(context, info) }
-    }
+    private fun show(info: UpdateRelease) = UpdateNotifications.showIfNewer(context, info)
 
     fun run(scenario: String): String {
         instrumentation.waitForIdleSync()
@@ -67,7 +65,7 @@ internal class UpdateNotificationChecks(private val instrumentation: Instrumenta
                 show(release)
                 SystemClock.sleep(250)
                 check(posted() == null) { "Yboard alerted twice for the same version" }
-                preferences.edit().remove(UpdateNotifications.LAST_VERSION).apply()
+                check(preferences.edit().remove(UpdateNotifications.LAST_VERSION).commit())
             }
             else -> error("Unknown notification test scenario")
         }

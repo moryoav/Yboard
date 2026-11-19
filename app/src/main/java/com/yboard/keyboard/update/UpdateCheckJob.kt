@@ -13,6 +13,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -26,8 +27,12 @@ class UpdateCheckJob : JobService() {
         check = CoroutineScope(Dispatchers.Main).launch {
             try {
                 val network = if (Build.VERSION.SDK_INT >= 28) params.network else null
-                val release = withContext(Dispatchers.IO) { AppUpdater(applicationContext, network).check() }
-                if (release != null) UpdateNotifications.showIfNewer(this@UpdateCheckJob, release)
+                withContext(Dispatchers.IO) {
+                    val app = applicationContext
+                    val release = AppUpdater(app, network).check()
+                    ensureActive()
+                    if (release != null) UpdateNotifications.showIfNewer(app, release)
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
