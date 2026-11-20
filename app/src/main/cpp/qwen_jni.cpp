@@ -17,7 +17,7 @@ std::once_flag initialized;
 constexpr int BEAM = 4;
 constexpr int MAX_CANDIDATES = 32;
 
-// JNI modified UTF-8 is not UTF-8: convert surrogate pairs before passing editor text to Qwen.
+// JNI modified UTF-8 is not UTF-8: convert surrogate pairs before passing editor text to the model.
 std::string utf8(JNIEnv * env, jstring value) {
     if (!value) return {};
     const jchar * chars = env->GetStringChars(value, nullptr);
@@ -128,7 +128,7 @@ struct Engine {
         params.n_gpu_layers = 0;
         params.load_mode = LLAMA_LOAD_MODE_MMAP;
         model = llama_model_load_from_file(path.c_str(), params);
-        if (!model) throw std::runtime_error("Could not load the verified Qwen model");
+        if (!model) throw std::runtime_error("Could not load the verified model");
         model_owner.reset(model);
         vocab = llama_model_get_vocab(model);
         vocabulary = llama_vocab_n_tokens(vocab);
@@ -157,7 +157,7 @@ struct Engine {
         return tokens;
     }
     void ensure_capacity(int required) {
-        if (required > 32768) throw std::runtime_error("The full sentence exceeds Qwen's context limit");
+        if (required > 32768) throw std::runtime_error("The full sentence exceeds the context limit");
         if (context && capacity >= required) return;
         int size = 2048;
         while (size < required) size *= 2;
@@ -181,12 +181,12 @@ struct Engine {
         params.abort_callback = abort;
         params.abort_callback_data = this;
         context = llama_init_from_model(model, params);
-        if (!context) throw std::runtime_error("Not enough memory to prepare Qwen");
+        if (!context) throw std::runtime_error("Not enough memory to prepare the model");
         capacity = size;
     }
     void decode(llama_batch batch) {
         check();
-        if (llama_decode(context, batch) != 0) { reset(); check(); throw std::runtime_error("Qwen could not evaluate this sentence"); }
+        if (llama_decode(context, batch) != 0) { reset(); check(); throw std::runtime_error("The model could not evaluate this sentence"); }
         check();
     }
     void prepare(std::string text, int64_t ticket) {
@@ -220,7 +220,7 @@ struct Engine {
         }
         cached = tokens;
         const float * logits = llama_get_logits_ith(context, -1);
-        if (!logits) throw std::runtime_error("Qwen did not return word probabilities");
+        if (!logits) throw std::runtime_error("The model did not return word probabilities");
         root_logits.assign(logits, logits + vocabulary);
     }
     double boundary_log_probability(const float * logits, double total) const {
@@ -291,7 +291,7 @@ struct Engine {
             logits.clear();
             for (size_t i = 0; i < next.size(); ++i) {
                 const float * output = llama_get_logits_ith(context, i);
-                if (!output) { llama_batch_free(batch); throw std::runtime_error("Missing Qwen branch probabilities"); }
+                if (!output) { llama_batch_free(batch); throw std::runtime_error("Missing branch probabilities"); }
                 logits.emplace_back(output, output + vocabulary);
             }
             llama_batch_free(batch);

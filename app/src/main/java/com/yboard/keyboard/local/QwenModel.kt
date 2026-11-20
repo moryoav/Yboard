@@ -28,19 +28,26 @@ object QwenModel {
     private const val QWEN35_FILE_NAME = "Qwen3.5-0.8B-Base-Q4_K_M.gguf"
     private const val QWEN35_SIZE = 547_308_064L
     private const val QWEN35_SHA256 = "250053ed8e33a8ddc4e4516cbfe06b51f2cc6c77da298c1c9a1e72c6df012123"
+    private const val MODEL_RELEASES = "https://github.com/moryoav/Yboard/releases/download"
+    private const val GEMMA_FILE = "gemma-3-270m-qat-Q4_0.gguf"
+    private const val GEMMA_ORIGIN = "https://huggingface.co/ggml-org/gemma-3-270m-qat-GGUF/resolve/455826a6464d1f352ff560df17f6f9eeec230082"
+    private const val GEMMA_ACCEPTED = "gemma_terms_2026_04_01"
+    const val GEMMA_TERMS_URL = "https://gemma.ai/resources/terms/"
 
     enum class Variant(
         val label: String,
         val fileName: String,
         val size: Long,
         val sha256: String,
-        private val release: String,
+        internal val url: String,
         internal val marker: String,
     ) {
-        QWEN3("Qwen3-0.6B-Base", FILE_NAME, SIZE, SHA256, "v1.9.0", "verified"),
-        QWEN35("Qwen3.5-0.8B-Base", QWEN35_FILE_NAME, QWEN35_SIZE, QWEN35_SHA256, "v1.10.0", "verified-qwen35");
-
-        internal val url get() = "https://github.com/moryoav/Yboard/releases/download/$release/$fileName"
+        QWEN3("Qwen3-0.6B-Base", FILE_NAME, SIZE, SHA256, "$MODEL_RELEASES/v1.9.0/$FILE_NAME", "verified"),
+        QWEN35("Qwen3.5-0.8B-Base", QWEN35_FILE_NAME, QWEN35_SIZE, QWEN35_SHA256,
+            "$MODEL_RELEASES/v1.10.0/$QWEN35_FILE_NAME", "verified-qwen35"),
+        GEMMA("Gemma 3 270M Base", GEMMA_FILE, 241_409_024L,
+            "0c4a546e737759fd7c60f4c34704f12cc3273222ba44a5bc3d6ba9d6053a9f9f",
+            "$GEMMA_ORIGIN/$GEMMA_FILE", "verified-gemma270m"),
     }
 
     data class State(val ready: Boolean = false, val downloading: Boolean = false, val bytes: Long = 0, val error: String? = null)
@@ -70,7 +77,7 @@ object QwenModel {
         selection = prefs
         val saved = prefs.getString("selected", null)
         mutable.value = Catalog(
-            selected = Variant.entries.firstOrNull { it.name == saved } ?: Variant.QWEN3,
+            selected = Variant.entries.firstOrNull { it.name == saved && !requiresTerms(it) } ?: Variant.QWEN3,
             models = Variant.entries.associateWith { model ->
                 val file = file(model)
                 val ready = file.length() == model.size && runCatching {
@@ -85,6 +92,13 @@ object QwenModel {
     private fun part(model: Variant) = File(directory, "${model.fileName}.part")
     fun addListener(listener: () -> Unit) { listeners.add(listener) }
     fun removeListener(listener: () -> Unit) { listeners.remove(listener) }
+    fun requiresTerms(model: Variant): Boolean =
+        model == Variant.GEMMA && selection?.getBoolean(GEMMA_ACCEPTED, false) != true
+
+    @MainThread fun acceptGemmaTerms() {
+        checkNotNull(selection).edit().putBoolean(GEMMA_ACCEPTED, true).apply()
+    }
+
     private fun publish(model: Variant, next: State) {
         val previous = mutable.value[model]
         mutable.update { it.copy(models = it.models + (model to next)) }
@@ -94,7 +108,7 @@ object QwenModel {
     }
 
     @MainThread fun select(model: Variant) {
-        if (model == selected || !state.value[model].ready) return
+        if (model == selected || !state.value[model].ready || requiresTerms(model)) return
         mutable.update { it.copy(selected = model) }
         checkNotNull(selection).edit().putString("selected", model.name).apply()
         LocalQwen.release()
@@ -103,7 +117,7 @@ object QwenModel {
 
     @Synchronized fun download(context: Context, model: Variant) {
         init(context)
-        if (transfer != null || state.value[model].ready) return
+        if (transfer != null || state.value[model].ready || requiresTerms(model)) return
         val job = Transfer(model)
         transfer = job
         publish(model, state.value[model].copy(downloading = true, error = null))
@@ -144,7 +158,7 @@ object QwenModel {
         job.call = requestCall
         if (job.stopped) requestCall.cancel()
         requestCall.execute().use { response ->
-            check(response.isSuccessful) { "Qwen could not be downloaded. Check the connection and try again." }
+            check(response.isSuccessful) { "The model could not be downloaded. Check the connection and try again." }
             if (offset > 0 && response.code != 206) offset = 0
             if (response.code == 206) check(response.header("Content-Range")?.startsWith("bytes $offset-") == true) { "The download could not be resumed. Try again." }
             val digest = MessageDigest.getInstance("SHA-256")
@@ -174,7 +188,7 @@ object QwenModel {
             check(count == model.size) { "The download was interrupted. Tap Resume download to continue." }
             if (hash != model.sha256) {
                 part.delete()
-                error("Qwen's download did not pass verification. Please download it again.")
+                error("The download did not pass verification. Please download it again.")
             }
             activate(part, model)
         }

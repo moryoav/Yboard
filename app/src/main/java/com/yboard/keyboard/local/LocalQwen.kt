@@ -47,7 +47,7 @@ object LocalQwen {
         closeModel()
         mutable.value = Status(loading = true, model = model)
         handle = QwenNative.load(QwenModel.file(model).absolutePath, (Runtime.getRuntime().availableProcessors() - 1).coerceIn(1, 4))
-        check(handle != 0L) { "Qwen could not be loaded on this device." }
+        check(handle != 0L) { "The model could not be loaded on this device." }
         loadedModel = model
         mutable.value = Status(loaded = true, model = model)
     }
@@ -60,7 +60,7 @@ object LocalQwen {
         worker.execute {
             if (model != QwenModel.selected) return@execute
             runCatching { ensureLoaded(model) }
-                .onFailure { mutable.value = Status(error = it.message ?: "Qwen could not be loaded", model = model) }
+                .onFailure { mutable.value = Status(error = it.message ?: "The model could not be loaded", model = model) }
         }
     }
     @Synchronized fun clearContext() {

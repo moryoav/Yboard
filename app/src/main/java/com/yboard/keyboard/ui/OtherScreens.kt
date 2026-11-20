@@ -81,7 +81,7 @@ fun TypingScreen(settings: YboardSettings, onBack: () -> Unit, onShortcuts: () -
     ScreenScaffold("Typing", onBack) {
         LocalPredictionSection()
         Section("Suggestions") {
-            SwitchRow("Word suggestions", "Show local Qwen predictions as you type", settings.suggestions) { b ->
+            SwitchRow("Word suggestions", "Show local predictions as you type", settings.suggestions) { b ->
                 Prefs.update { it.copy(suggestions = b) }
             }
             SwitchRow(
@@ -231,7 +231,7 @@ fun AboutScreen(onBack: () -> Unit, updateCheckRequested: Boolean, onUpdateCheck
                 "Everything you type with the keys, your clipboard history, learned words and themes stay on this phone. " +
                     "The AI features use the internet, with your own OpenAI key: voice typing (while the mic is on, " +
                     "your voice and, for commands, the text just before the cursor), " +
-                    "and the ✨ emoji sprinkle when you tap it. Update checks contact GitHub without sending keyboard text or your OpenAI key. Qwen predictions and swipe ranking run locally. The model download sends no typing text.",
+                    "and the ✨ emoji sprinkle when you tap it. Update checks contact GitHub without sending keyboard text or your OpenAI key. Word predictions and swipe ranking run locally. Model downloads send no typing text.",
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
             )
@@ -242,7 +242,8 @@ fun AboutScreen(onBack: () -> Unit, updateCheckRequested: Boolean, onUpdateCheck
                     "Dictionaries: Android Open Source Project keyboard word lists, Apache License 2.0. " +
                     "Includes Dictionaries © Lexiteria LLC. Used by permission.\n" +
                     "Emoji search words: Unicode CLDR, Unicode License v3.\n" +
-                    "Local models: Qwen3-0.6B-Base and Qwen3.5-0.8B-Base, Apache License 2.0, converted to Q4_K_M.\n" +
+                    "Qwen3-0.6B-Base and Qwen3.5-0.8B-Base use Apache License 2.0 and Q4_K_M weights.\n" +
+                    "Gemma 3 270M Base uses Q4_0 weights under the Gemma Terms of Use.\n" +
                     "Inference runtime: llama.cpp, MIT License.",
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),

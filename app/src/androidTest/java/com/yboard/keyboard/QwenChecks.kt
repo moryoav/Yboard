@@ -2,6 +2,7 @@ package com.yboard.keyboard
 
 import android.app.Instrumentation
 import android.content.Context
+import android.os.SystemClock
 import com.yboard.keyboard.local.LocalQwen
 import com.yboard.keyboard.local.QwenModel
 import org.json.JSONArray
@@ -99,6 +100,56 @@ internal object QwenChecks {
         } finally {
             instrumentation.runOnMainSync { QwenModel.select(saved) }
         }
+    }
+
+    fun benchmark(instrumentation: Instrumentation): String {
+        QwenModel.init(instrumentation.targetContext)
+        val saved = QwenModel.selected
+        val report = JSONArray()
+        val next = listOf("I will be", "Thanks for sharing the", "אני רוצה לשתות")
+        val completions = listOf("See you" to "tom", "I will bring the" to "bo", "אני רוצה לשתות" to "מ")
+        val english = listOf("there", "three", "the", "their", "then", "these", "them", "they",
+            "where", "here", "tree", "through", "though", "thought", "thread", "those", "threw",
+            "throw", "throat", "threat", "theater", "theory", "theme", "therefore")
+        val hebrew = listOf("מים", "שמים", "יין", "מיץ", "חלב", "תה", "קפה", "סודה",
+            "משקה", "בירה", "מרק", "מחר", "מפה", "מיד", "מישהו", "משהו", "מתוק",
+            "טוב", "שלום", "בוקר", "עכשיו", "לחם", "פרי", "אוכל")
+        val glides = listOf("I will be" to english, "My favorite number is" to english, "אני רוצה לשתות" to hebrew)
+        try {
+            for (model in QwenModel.Variant.entries) {
+                check(QwenModel.state.value[model].ready) { "Download ${model.label} first" }
+                instrumentation.runOnMainSync { QwenModel.select(model) }
+                val warmup = LocalQwen.predictBlocking("I have a plan")
+                check(warmup.words.isNotEmpty() && LocalQwen.status.value.model == model)
+                val nextTimes = next.map { sentence ->
+                    val output = LocalQwen.predictBlocking(sentence)
+                    check(output.words.isNotEmpty()) { "${model.label} returned no next-word suggestions" }
+                    output.elapsedMs
+                }
+                val completionTimes = completions.map { (sentence, prefix) ->
+                    val output = LocalQwen.predictBlocking(sentence, prefix)
+                    check(output.words.isNotEmpty() && output.words.all { it.startsWith(prefix, true) }) {
+                        "${model.label} returned no matching completion for $prefix"
+                    }
+                    output.elapsedMs
+                }
+                val glideTimes = glides.map { (sentence, words) ->
+                    check(words.size == 24)
+                    val start = SystemClock.elapsedRealtime()
+                    val scores = rank(sentence, words)
+                    val elapsed = SystemClock.elapsedRealtime() - start
+                    check(scores.size == words.size && scores.all { it.isFinite() })
+                    elapsed
+                }
+                report.put(JSONObject().put("model", model.label)
+                    .put("nextWordMs", JSONArray(nextTimes))
+                    .put("completionMs", JSONArray(completionTimes))
+                    .put("glideRanking24Ms", JSONArray(glideTimes)))
+            }
+        } finally {
+            instrumentation.runOnMainSync { QwenModel.select(saved) }
+        }
+        return report.toString()
     }
 
     private fun rank(sentence: String, candidates: List<String>): DoubleArray {

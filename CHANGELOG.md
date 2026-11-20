@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.12.0
+
+- Added Gemma 3 270M Base as a 241 MB downloadable model for local word suggestions and swipe typing.
+
 ## 1.11.0
 
 - Reopened replacement suggestions when you tap inside an earlier word in editable text. Picking a replacement keeps the surrounding spaces and punctuation.

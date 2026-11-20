@@ -557,7 +557,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         root?.toolbar?.setSuggestions(display, primary)
     }
 
-    // Other AI features keep their own worker. Typing and glide probabilities come only from Qwen.
+    // Other AI features keep their own worker. Typing and glide probabilities use the selected local model.
     private val aiExecutor = Executors.newSingleThreadExecutor()
     private var localRound = 0L
     private var localPending: Runnable? = null
@@ -615,7 +615,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     private fun showModelNote(text: String) {
         clearStrip()
         modelNote = true
-        modelNoteAction = text == "Download Qwen" || text == "Qwen unavailable"
+        modelNoteAction = text == "Download model" || text == "Model unavailable"
         root?.toolbar?.setSuggestions(listOf("", text, ""), -1)
     }
 
@@ -640,7 +640,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
 
     private fun requestLocal(input: SentenceContext.Input) {
         val model = QwenModel.selectedState
-        if (!model.ready) { showModelNote(if (model.downloading) "Downloading Qwen…" else "Download Qwen"); return }
+        if (!model.ready) { showModelNote(if (model.downloading) "Downloading model…" else "Download model"); return }
         val requested = qwenRequested
         if (requested?.sameWord(input) == true && input.prefix.startsWith(requested.prefix, true)) return
         val prior = qwenInput
@@ -668,7 +668,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
                 }.onFailure {
                     failedInput = now
                     retryAfter = SystemClock.elapsedRealtime() + 3000
-                    showModelNote("Qwen unavailable")
+                    showModelNote("Model unavailable")
                 }
             }
         }
@@ -755,7 +755,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         if (input.prefix.isEmpty() && !settings.nextWords) { cancelAiPredictions(); clearStrip(); return }
         if (qwenInput?.sameWord(input) == false) { qwenInput = null; qwenWords = emptyList() }
         val engine = LocalQwen.status.value
-        if (!renderLocal(input)) showModelNote(if (engine.model == predictionModel && engine.loading) "Loading Qwen…" else "Predicting…")
+        if (!renderLocal(input)) showModelNote(if (engine.model == predictionModel && engine.loading) "Loading model…" else "Predicting…")
         requestLocal(input)
     }
 
@@ -1049,7 +1049,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         endVoice()
         if (!settings.swipeTyping || !localAllowed() || editorInfo?.let { EditorPolicy.glide(it.inputType) } != true) return
         val model = QwenModel.selectedState
-        if (!model.ready) { showModelNote(if (model.downloading) "Downloading Qwen…" else "Download Qwen"); return }
+        if (!model.ready) { showModelNote(if (model.downloading) "Downloading model…" else "Download model"); return }
         val decoder = decoder ?: return
         val candidates = decoder.decodeScored(path, keyCenters, keyWidth, 24, includeFrequency = false)
         if (candidates.isEmpty()) return
@@ -1218,7 +1218,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
             pendingSwipes.removeFirst()
             val ranked = result.getOrNull()?.let { GlideRanking.rank(candidates, it) }.orEmpty()
             if (ranked.isEmpty()) {
-                if (swipePending) recognizeNextSwipe() else showModelNote("Qwen unavailable")
+                if (swipePending) recognizeNextSwipe() else showModelNote("Model unavailable")
                 return@rank
             }
             fun cased(word: String) = when (casing) {
