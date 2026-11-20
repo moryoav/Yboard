@@ -241,7 +241,7 @@ fun VoiceScreen(settings: YboardSettings, onBack: () -> Unit) {
                 "${settings.voicePauseMs} ms", steps = 24) { value ->
                 Prefs.update { it.copy(voicePauseMs = (value / 50).roundToInt() * 50) }
             }
-            HintText("A longer pause gives you more time to think before a phrase is finalized. Clear commands can finish sooner.")
+            HintText("Yboard can wait a little longer when a sentence sounds unfinished. Clear commands can finish sooner.")
             val silenceChoices = listOf(8, 15, 30, 0)
             ChipRow("Stop after silence", listOf("8 sec", "15 sec", "30 sec", "Never"),
                 silenceChoices.indexOf(settings.voiceSilenceSeconds)) { i ->

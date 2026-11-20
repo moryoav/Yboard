@@ -14,6 +14,7 @@ class Vad(
     private val prerollFrames: Int = 15,   // keep 300 ms from before the voice started
     private val maxPhraseFrames: Int = 750, // cut very long phrases at 15 s
     private val idleFrames: Int = 400,     // 8 s with nothing said
+    private val continuationEndFrames: Int = endFrames,
 ) {
     interface Sink {
         fun audio(frame: ShortArray)
@@ -22,13 +23,14 @@ class Vad(
         fun level(level: Float)
     }
 
-    var inSpeech = false
+    @Volatile var inSpeech = false
         private set
     var noiseDb = -60.0
         private set
 
     /** Set while the words so far are a whole command: a shorter pause ends the phrase. */
     @Volatile var quickEndFrames: Int = 0
+    @Volatile var transcriptEndsSentence: Boolean = false
 
     private var loudRun = 0
     private var quietRun = 0
@@ -66,10 +68,12 @@ class Vad(
             sink.audio(frame)
             phraseFrames++
             if (loud) quietRun = 0 else quietRun++
-            val needed = quickEndFrames.takeIf { it > 0 } ?: endFrames
+            val needed = quickEndFrames.takeIf { it > 0 }
+                ?: if (transcriptEndsSentence) endFrames else continuationEndFrames
             if (quietRun >= needed || phraseFrames >= maxPhraseFrames) {
                 inSpeech = false
                 quickEndFrames = 0
+                transcriptEndsSentence = false
                 loudRun = 0
                 idle = 0
                 sink.phraseEnd()

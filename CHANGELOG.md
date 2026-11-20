@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.9.4
+
+- Kept short hesitations in the same voice transcription segment when a sentence appears unfinished.
+- Fixed extra capitalization in dictated text and kept capitalization after spoken sentence punctuation.
+
 ## 1.9.3
 
 - Added optional update notifications under About. Yboard checks for new releases in the background roughly every three days and shows one alert per version.

@@ -33,11 +33,12 @@ object OpenAi {
     private const val TAG = "YboardVoice"
 
     private const val SPEECH_PROMPT =
-        "Verbatim phone dictation in English and Hebrew, never in any other language. Automatically punctuate the transcript, even " +
-            "when the speaker does not say the punctuation aloud. Use commas for lists and clause boundaries, " +
-            "periods at the end of complete statements, and question marks after questions. " +
-            "A pause inside an unfinished sentence does not end it. Follow this style: " +
-            "If it rains, I'll stay home. I bought milk, bread, and eggs. Are you coming? " +
+        "Verbatim phone dictation in English and Hebrew, never in any other language. Add punctuation automatically, " +
+            "even when the speaker does not name it. Use the meaning of the words to place commas and sentence breaks. " +
+            "Use commas for lists and introductory clauses, periods after complete statements, and question marks after questions. " +
+            "Keep a sentence together through hesitations and audio cuts when the words continue the same thought. " +
+            "Capitalize sentence starts, names, acronyms, and I. Continue a mid-sentence fragment in lowercase. Follow this style: " +
+            "I sent the message using voice typing. If it rains, I'll stay home. I bought milk, bread, and eggs. Are you coming? " +
             "אם ירד גשם, אשאר בבית. קניתי חלב, לחם וביצים. אתה מגיע? " +
             "Keep spoken editing commands and punctuation names as words, such as new line, delete that, " +
             "scratch that, send, question mark, comma, and period."

@@ -269,8 +269,12 @@ class VoiceTyping(
         val p = phraseFor(itemId) ?: return
         if (firstWordsLogged.add(itemId)) Log.i(TAG, "first words arrived (still talking: ${mic.speaking})")
         p.text.append(delta)
-        // A whole command so far? Then a short pause is enough to carry it out.
-        if (smartCommands && !p.done && p === phrases.values.lastOrNull()) mic.setQuickEnd(LocalCommands.quickEndFrames(p.shown))
+        // A delta from a turn we already committed must not affect the next mic phrase.
+        if (!p.done && p.audio == null && p === phrases.values.lastOrNull()) {
+            val shown = p.shown
+            val commandFrames = if (smartCommands) LocalCommands.quickEndFrames(shown) else 0
+            mic.setPauseHint(commandFrames, VoiceEdits.endsSentence(shown))
+        }
         showComposing()
     }
 
@@ -454,7 +458,7 @@ class VoiceTyping(
         val n = ++phraseCount
         val before = text.toString()
         if (!smartCommands) {
-            apply(VoiceEdit("", spoken), remember = true)
+            insertDictation(spoken)
             return
         }
         // 1) Simple commands, instantly and without the internet.
@@ -479,9 +483,9 @@ class VoiceTyping(
         // 2) Spoken punctuation inside the sentence: "hi question mark" -> "hi?".
         val dictated = LocalCommands.spokenPunctuation(spoken)
         // 3) Anything else that sounds like editing goes to the AI.
-        if (!smartCommands || !VoiceEdits.looksLikeCommand(spoken)) {
+        if (!VoiceEdits.looksLikeCommand(spoken)) {
             Log.i(TAG, "phrase $n: dictation (${dictated.length} chars)")
-            apply(VoiceEdit("", dictated), remember = true)
+            insertDictation(dictated)
             return
         }
         Log.i(TAG, "phrase $n: asking AI")
@@ -500,13 +504,14 @@ class VoiceTyping(
                 thinking = null
                 if (edit == null) {
                     host.showMessage("The AI didn't answer, so the words were typed instead.")
-                    apply(VoiceEdit("", dictated), remember = true)
+                    insertDictation(dictated)
                 } else {
                     Log.i(TAG, "phrase $n: AI edit remove=${edit.remove.length} insert=${edit.insert.length}")
                     if (edit.remove.isNotEmpty() && typed.isNotEmpty() && edit.remove.endsWith(typed.last())) {
                         typed.removeAt(typed.size - 1)
                     }
-                    apply(edit, remember = edit.insert.isNotBlank())
+                    if (edit.remove.isEmpty() && edit.insert == spoken) insertDictation(dictated)
+                    else apply(edit, remember = edit.insert.isNotBlank())
                 }
                 if (sendAfterThinking) {
                     sendAfterThinking = false
@@ -671,6 +676,11 @@ class VoiceTyping(
     private fun hebrewNow(): Boolean =
         com.yboard.keyboard.text.NameSpelling.hebrewText(text.takeLast(80).toString()) ?: (keyboardLanguage == "he")
 
+    private fun insertDictation(spoken: String) {
+        val words = VoiceEdits.continuationCase(text.toString(), spoken, myNames)
+        apply(VoiceEdit("", words), remember = true)
+    }
+
     private fun apply(edit0: VoiceEdit, remember: Boolean) {
         // Your names in the language you're speaking ("Yoav" in English, "יואב" in Hebrew).
         val edit = if (remember && namePairs.isNotEmpty()) {
@@ -720,10 +730,15 @@ class VoiceTyping(
         // While sending, keep the box as it is (new words would be sent too). They show right after.
         if (sending != null) { ui(); return }
         val ic = host.inputConnection() ?: return
-        val shown = phrases.values.mapNotNull { p -> LocalCommands.preview(p.shown, smartCommands) }
-            .filter { it.isNotEmpty() }
-        val joined = shown.joinToString(" ")
-        val preview = if (joined.isEmpty()) "" else VoiceEdits.forInsert(text.toString(), joined)
+        val before = text.toString()
+        val preview = buildString {
+            for (p in phrases.values) {
+                val shown = LocalCommands.preview(VoiceEdits.attachPunctuation(p.shown), smartCommands) ?: continue
+                val left = if (isEmpty()) before else toString()
+                val words = VoiceEdits.continuationCase(left, shown, myNames)
+                append(VoiceEdits.forInsert(left, words))
+            }
+        }
         if (preview != composing) {
             if (cursor >= 0) expectCursor(cursor + preview.length)
             ic.setComposingText(preview, 1)

@@ -342,16 +342,18 @@ object LocalCommands {
     fun spokenPunctuation(text: String): String {
         var t = text
         for ((word, symbol) in inline) {
-            val re = Regex("[\\s,.;:]*(?<!\\p{L})" + Regex.escape(word) + "(?!\\p{L})[.,!?;:]*", RegexOption.IGNORE_CASE)
-            t = t.replace(re) { if (symbol.endsWith("\n")) symbol else "$symbol " }
+            val sentenceStart = if (symbol.length == 1 && symbol[0] in ".?!") "(?:[ \\t]+([a-z]))?" else ""
+            val re = Regex("[\\s,.;:]*(?<!\\p{L})" + Regex.escape(word) + "(?!\\p{L})[.,!?;:]*" + sentenceStart,
+                RegexOption.IGNORE_CASE)
+            t = t.replace(re) { match ->
+                if (symbol.endsWith("\n")) symbol
+                else "$symbol ${match.groupValues.getOrNull(1).orEmpty().uppercase()}"
+            }
         }
         for ((word, symbol) in endOnly) {
             val re = Regex("[\\s,.;:]*(?<!\\p{L})" + Regex.escape(word) + "[.,!?;:]*\\s*$", RegexOption.IGNORE_CASE)
             t = t.replace(re, symbol)
         }
-        t = t.replace(Regex(" +\n"), "\n").replace(Regex("\n +"), "\n").replace(Regex(" {2,}"), " ").trim(' ')
-        // A new sentence after ? ! . starts with a capital (English).
-        t = t.replace(Regex("([.?!]) ([a-z])")) { m -> m.groupValues[1] + " " + m.groupValues[2].uppercase() }
-        return t
+        return t.replace(Regex(" +\n"), "\n").replace(Regex("\n +"), "\n").replace(Regex(" {2,}"), " ").trim(' ')
     }
 }

@@ -29,9 +29,11 @@ class MicStream(private val listener: Listener, private val options: VoiceOption
     /** Someone is talking right now. */
     override val speaking: Boolean get() = vad?.inSpeech == true
 
-    /** Let a shorter pause end the current phrase (0 = normal). */
-    override fun setQuickEnd(frames: Int) {
-        vad?.let { if (it.inSpeech) it.quickEndFrames = frames }
+    override fun setPauseHint(commandFrames: Int, endsSentence: Boolean) {
+        vad?.takeIf { it.inSpeech }?.let {
+            it.transcriptEndsSentence = endsSentence
+            it.quickEndFrames = commandFrames
+        }
     }
 
     override fun start() {
@@ -68,7 +70,11 @@ class MicStream(private val listener: Listener, private val options: VoiceOption
             listener.onMicStopped()
             return
         }
-        val vad = Vad(endFrames = options.endFrames, idleFrames = options.idleFrames).also { this.vad = it }
+        val vad = Vad(
+            endFrames = options.endFrames,
+            idleFrames = options.idleFrames,
+            continuationEndFrames = options.continuationEndFrames,
+        ).also { this.vad = it }
         val frame = rate / 50                       // 20 ms
         val raw = ShortArray(frame * factor)
         val out = ShortArray(frame)

@@ -7,6 +7,7 @@ import com.yboard.keyboard.voice.OpenAi
 import com.yboard.keyboard.voice.Vad
 import com.yboard.keyboard.voice.VoiceEdit
 import com.yboard.keyboard.voice.VoiceEdits
+import com.yboard.keyboard.voice.VoiceOptions
 import com.yboard.keyboard.voice.Wav
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -53,13 +54,33 @@ class VoiceTest {
         assertEquals(9, LocalCommands.quickEndFrames("question mark"))
         assertEquals(0, LocalCommands.quickEndFrames("I went to the"))
         // The VAD ends a command phrase after the short pause instead of the normal one.
-        val vad = Vad()
+        val options = VoiceOptions()
+        val vad = Vad(endFrames = options.endFrames, continuationEndFrames = options.continuationEndFrames)
         val c = Counter()
         repeat(50) { vad.process(noise(40), c) }
         repeat(30) { vad.process(voice(6000, it), c) }
         vad.quickEndFrames = 9
         repeat(10) { vad.process(noise(40), c) }
         assertEquals(1, c.ends)
+    }
+
+    @Test
+    fun shortHesitationStaysInTheSameAudioTurn() {
+        val options = VoiceOptions()
+        val vad = Vad(endFrames = options.endFrames, continuationEndFrames = options.continuationEndFrames)
+        val c = Counter()
+        repeat(30) { vad.process(voice(6000, it), c) }
+        repeat(31) { vad.process(noise(40), c) } // 620 ms, longer than the normal pause
+        assertEquals(0, c.ends)
+        repeat(30) { vad.process(voice(6000, it), c) }
+        vad.transcriptEndsSentence = true
+        repeat(options.endFrames) { vad.process(noise(40), c) }
+        assertEquals(1, c.ends)
+        repeat(30) { vad.process(voice(6000, it), c) }
+        repeat(options.continuationEndFrames - 1) { vad.process(noise(40), c) }
+        assertEquals(1, c.ends)
+        vad.process(noise(40), c)
+        assertEquals(2, c.ends)
     }
 
     @Test
@@ -88,11 +109,26 @@ class VoiceTest {
     fun dictationGetsSpacesAndSensibleCapitals() {
         assertEquals("Hi there.", VoiceEdits.forInsert("", "Hi there."))
         assertEquals(" How are you?", VoiceEdits.forInsert("Hello.", "How are you?"))
-        assertEquals(" and bought milk.", VoiceEdits.forInsert("I went to the store", "And bought milk."))
+        assertEquals(" And bought milk.", VoiceEdits.forInsert("I went to the store", "And bought milk."))
         assertEquals(" John said hi.", VoiceEdits.forInsert("I talked to", "John said hi."))
         assertEquals("?", VoiceEdits.forInsert("hi", "?"))
         assertEquals("there", VoiceEdits.forInsert("hi ", "there"))
         assertEquals(" מה שלומך?", VoiceEdits.forInsert("היי", "מה שלומך?"))
+    }
+
+    @Test
+    fun continuationCasePreservesSentenceStartsNamesAndAcronyms() {
+        fun after(before: String, words: String, names: Set<String> = emptySet()) =
+            VoiceEdits.continuationCase(before, words, names)
+        assertEquals("using the keyboard", after("I typed this", "Using the keyboard"))
+        assertEquals("wrong words", after("It capitalized", "Wrong words"))
+        assertEquals("And then?", after("That works.", "And then?"))
+        assertEquals("And then?", after("“That works.” ", "And then?"))
+        assertEquals("And then?", after("That works\n ", "And then?"))
+        assertEquals("John used NASA data", after("I heard", "John used NASA data"))
+        assertEquals("RIGHT keys", after("I used the", "RIGHT keys"))
+        assertEquals("Right Now", after("I listened to", "Right Now", setOf("right")))
+        assertEquals("I stayed", after("And", "I stayed"))
     }
 
     @Test
@@ -211,6 +247,8 @@ class VoiceTest {
         assertEquals("שלום?", LocalCommands.spokenPunctuation("שלום סימן שאלה"))
         assertEquals("כן, בטח.", LocalCommands.spokenPunctuation("כן פסיק בטח נקודה"))
         assertEquals("Plain words stay the same.", LocalCommands.spokenPunctuation("Plain words stay the same."))
+        assertEquals("Use e.g. milk, eggs and bread.", LocalCommands.spokenPunctuation("Use e.g. milk comma eggs and bread."))
+        assertEquals("I typed. using the keyboard", LocalCommands.spokenPunctuation("I typed. using the keyboard"))
     }
 
     @Test
@@ -246,6 +284,8 @@ class VoiceTest {
         assertEquals("gpt-live-transcribe", input.getJSONObject("transcription").getString("model"))
         assertEquals(2, input.getJSONObject("transcription").getJSONArray("languages").length())
         val prompt = input.getJSONObject("transcription").getString("prompt")
+        assertTrue(prompt.contains("Add punctuation automatically"))
+        assertTrue(prompt.contains("Keep a sentence together through hesitations"))
         assertTrue(prompt.contains("I bought milk, bread, and eggs."))
         assertTrue(prompt.contains("אם ירד גשם, אשאר בבית."))
         assertTrue(prompt.contains("Keep spoken editing commands and punctuation names as words"))

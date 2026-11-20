@@ -65,6 +65,7 @@ object VoiceRegression {
         var sends = 0
         var commandCalls = 0
         val commits = ArrayList<String>()
+        val pauseHints = ArrayList<Pair<Int, Boolean>>()
         lateinit var micListener: MicStream.Listener
         var micPending = false
         var micStopped = false
@@ -84,7 +85,9 @@ object VoiceRegression {
                             if (micPending) { micPending = false; listener.onPhraseEnd() }
                             listener.onMicStopped()
                         }
-                        override fun setQuickEnd(frames: Int) {}
+                        override fun setPauseHint(commandFrames: Int, endsSentence: Boolean) {
+                            pauseHints.add(commandFrames to endsSentence)
+                        }
                     }
                 }
                 override fun connection(key: String, languages: List<String>, listener: LiveTranscriber.Listener,
@@ -151,6 +154,26 @@ object VoiceRegression {
             f.phrase(); f.results.add("אם ירד גשם , אשאר בבית .")
             f.voice.onClosed("offline", 0); f.clock.advance()
             check(f.fileCalls == 1 && f.text() == "אם ירד גשם, אשאר בבית.")
+        }, smart = false)
+        scenario({ f ->
+            f.audio(); f.voice.onDelta("one", "I am sending this")
+            check(f.pauseHints == listOf(0 to false))
+            f.phrase(); f.voice.onDelta("one", " message.")
+            check(f.pauseHints == listOf(0 to false)) { "A committed turn changed the mic pause" }
+            f.finish("one", "I am sending this message")
+            f.audio(); f.voice.onDelta("two", "Using the voice keyboard.")
+            check(f.pauseHints.last() == (0 to true))
+            check(f.text() == "I am sending this message using the voice keyboard.")
+            f.phrase(); f.finish("two", "Using the voice keyboard.")
+            f.phrase(); f.finish("three", "It capitalized")
+            f.phrase(); f.finish("four", "Wrong words, e.g. this one.")
+            check(f.text() == "I am sending this message using the voice keyboard. It capitalized wrong words, e.g. this one.")
+        })
+        scenario({ f ->
+            f.phrase(); f.finish("one", "I'm dictating")
+            f.phrase(); f.results.add("Using the keyboard")
+            f.voice.onClosed("offline", 0); f.clock.advance()
+            check(f.fileCalls == 1 && f.text() == "I'm dictating using the keyboard")
         }, smart = false)
         scenario({ f ->
             f.phrase(); f.voice.onCommitted("one"); f.voice.onDelta("one", "First")

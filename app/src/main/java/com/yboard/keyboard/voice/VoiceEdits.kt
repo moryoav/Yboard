@@ -38,23 +38,31 @@ object VoiceEdits {
         "and", "but", "or", "so", "then", "the", "a", "an", "to", "of", "in", "on", "at", "for", "with",
         "because", "that", "this", "it", "is", "was", "we", "you", "he", "she", "they", "my", "your",
         "his", "her", "our", "their", "if", "when", "while", "as", "from", "about", "like", "just",
+        "using", "being", "having", "doing", "going", "getting", "making", "taking", "working",
+        "really", "probably", "usually", "sometimes", "especially", "already", "still", "almost",
+        "wrong", "right", "another", "each", "every", "some", "any", "these", "those",
     )
 
-    /**
-     * Prepares dictated [text] to go after [before]: adds a space when needed, and lowercases
-     * a word like "And" that the speech model capitalized only because the speaker paused.
-     */
+    /** Restores the casing of common words at the start of a continuation of the current sentence. */
+    fun continuationCase(before: String, text: String, protectedWords: Set<String>): String {
+        val left = before.trimEnd(' ', '\t')
+        if (left.isBlank() || left.endsWith('\n')) return text
+        if (endsSentence(left)) return text
+        val word = text.takeWhile { it.isLetter() || it == '\'' || it == '’' }
+        val lower = word.lowercase()
+        if (word.firstOrNull()?.isUpperCase() != true || word.drop(1).any { it.isUpperCase() } ||
+            lower !in lowerAfterPause || lower in protectedWords) return text
+        return text.replaceFirstChar { it.lowercaseChar() }
+    }
+
+    fun endsSentence(text: String): Boolean =
+        text.trimEnd(' ', '\t', '"', '\'', '”', '’', ')', ']').lastOrNull()?.let { it in ".!?…" } == true
+
+    /** Adds a separating space when the editor needs one. */
     fun forInsert(before: String, text: String): String {
         if (text.isEmpty()) return text
         var t = text
         val prev = before.lastOrNull()
-        val sentenceEnded = before.isBlank() || before.trimEnd().lastOrNull()?.let { it in ".!?\n" } == true
-        if (!sentenceEnded && t.first().isUpperCase()) {
-            val firstWord = t.takeWhile { it.isLetter() || it == '\'' }
-            if (firstWord.lowercase() in lowerAfterPause && firstWord.drop(1).none { it.isUpperCase() }) {
-                t = t.replaceFirstChar { it.lowercaseChar() }
-            }
-        }
         val needsSpace = prev != null && !prev.isWhitespace() && prev != '(' && prev != '[' &&
             t.first() !in noSpaceBefore && !t.first().isWhitespace()
         if (needsSpace) t = " $t"
