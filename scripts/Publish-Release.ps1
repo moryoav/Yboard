@@ -58,13 +58,14 @@ if ($versionName -notmatch '^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$' -or $versionCod
 $tag = "v$versionName"
 $prerelease = $versionName.Contains('-')
 $modelAsset = $null
-if ($versionName -eq '1.9.0' -and -not $ModelFile) { throw 'Supply the verified Qwen model for the first local-prediction release.' }
+if ($versionName -in @('1.9.0', '1.10.0') -and -not $ModelFile) { throw 'Supply the verified model introduced in this release.' }
 if ($ModelFile) {
     $ModelFile = (Resolve-Path -LiteralPath $ModelFile).Path
     $modelSource = Get-Content -LiteralPath 'app/src/main/java/com/yboard/keyboard/local/QwenModel.kt' -Raw
-    $modelName = [regex]::Match($modelSource, 'const val FILE_NAME = "([^"]+)"').Groups[1].Value
-    $modelDigest = [regex]::Match($modelSource, 'const val SHA256 = "([a-f0-9]{64})"').Groups[1].Value
-    $modelSize = [long]([regex]::Match($modelSource, 'const val SIZE = ([0-9_]+)L').Groups[1].Value.Replace('_', ''))
+    $modelPrefix = if ($versionName -eq '1.10.0') { 'QWEN35_' } else { '' }
+    $modelName = [regex]::Match($modelSource, ('const val {0}FILE_NAME = "([^"]+)"' -f $modelPrefix)).Groups[1].Value
+    $modelDigest = [regex]::Match($modelSource, ('const val {0}SHA256 = "([a-f0-9]{{64}})"' -f $modelPrefix)).Groups[1].Value
+    $modelSize = [long]([regex]::Match($modelSource, ('const val {0}SIZE = ([0-9_]+)L' -f $modelPrefix)).Groups[1].Value.Replace('_', ''))
     if ((Split-Path $ModelFile -Leaf) -ne $modelName -or (Get-Item -LiteralPath $ModelFile).Length -ne $modelSize -or
         (Get-FileHash -LiteralPath $ModelFile -Algorithm SHA256).Hash.ToLowerInvariant() -ne $modelDigest) {
         throw 'The Qwen release asset does not match the model pinned in the app.'

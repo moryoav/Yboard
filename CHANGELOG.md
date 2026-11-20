@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.10.0
+
+- Added Qwen3.5-0.8B-Base as an optional on-device model for word suggestions and swipe typing.
+- Added a selector to switch between downloaded models in Typing or AI models.
+
 ## 1.9.5
 
 - Kept dictation together across pauses so automatic punctuation can use the words on both sides of a hesitation.

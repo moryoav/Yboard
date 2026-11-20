@@ -21,7 +21,7 @@ A clean, customizable Android keyboard for English and Hebrew, styled after Gboa
 - Long-press: accents (é ñ…), numbers, punctuation; comma → emoji
 - Space-bar slide moves the cursor, vibration & sound with strength/volume
 - Quiet hours: under Sound & vibration, set a daily start and end time and pause key sounds, vibration, or both. Overnight schedules are supported; matching times mean all day. Usual settings resume afterward.
-- Typing predictions and swipe ranking use local Qwen after a one-time 397 MB model download. Voice typing, name spellings and emoji sprinkle use your OpenAI key.
+- Typing predictions and swipe ranking use a local Qwen model. Download and choose a model in Typing or AI models. Voice typing, name spellings and emoji sprinkle use your OpenAI key.
 - Font: Google Sans (what Gboard uses), bundled under the SIL Open Font License, trimmed to
   Latin + Hebrew (`res/font/`, license in `assets/licenses/`)
 - Registers as ONE keyboard (no Android subtypes); 🌐 only flips English/Hebrew and never

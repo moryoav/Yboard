@@ -558,8 +558,18 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     private var suggestionText: String? = null
     private var modelNote = false
     private var modelNoteAction = false
+    private var predictionModel = QwenModel.selected
     private val modelListener: () -> Unit = {
-        main.post { failedInput = null; updateSuggestions() }
+        val selected = QwenModel.selected
+        if (predictionModel != selected) {
+            predictionModel = selected
+            cancelAiPredictions()
+            qwenInput = null
+            qwenWords = emptyList()
+            lastSwipe = null
+        }
+        failedInput = null
+        updateSuggestions()
     }
 
     private fun cancelAiPredictions() {
@@ -614,7 +624,8 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     }
 
     private fun requestLocal(input: SentenceContext.Input) {
-        if (!QwenModel.state.value.ready) { showModelNote(if (QwenModel.state.value.downloading) "Downloading Qwen…" else "Download Qwen"); return }
+        val model = QwenModel.selectedState
+        if (!model.ready) { showModelNote(if (model.downloading) "Downloading Qwen…" else "Download Qwen"); return }
         val requested = qwenRequested
         if (requested?.sameWord(input) == true && input.prefix.startsWith(requested.prefix, true)) return
         val prior = qwenInput
@@ -723,7 +734,8 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         if (input.context.isBlank() && input.prefix.isEmpty()) { cancelAiPredictions(); clearStrip(); return }
         if (input.prefix.isEmpty() && !settings.nextWords) { cancelAiPredictions(); clearStrip(); return }
         if (qwenInput?.sameWord(input) == false) { qwenInput = null; qwenWords = emptyList() }
-        if (!renderLocal(input)) showModelNote(if (LocalQwen.status.value.loading) "Loading Qwen…" else "Predicting…")
+        val engine = LocalQwen.status.value
+        if (!renderLocal(input)) showModelNote(if (engine.model == predictionModel && engine.loading) "Loading Qwen…" else "Predicting…")
         requestLocal(input)
     }
 
@@ -1005,7 +1017,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     // --------------------------------------------------------- swipe typing
 
     override fun onSwipeStart() {
-        if (swipePending || !localAllowed() || !QwenModel.state.value.ready) return
+        if (swipePending || !localAllowed() || !QwenModel.selectedState.ready) return
         val input = localInput() ?: return
         LocalQwen.prepare(input.context + input.prefix)
     }
@@ -1013,7 +1025,8 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     override fun onSwipe(path: List<Pt>, keyCenters: Map<Char, Pt>, keyWidth: Float) {
         endVoice()
         if (!settings.swipeTyping || !localAllowed() || editorInfo?.let { EditorPolicy.glide(it.inputType) } != true) return
-        if (!QwenModel.state.value.ready) { showModelNote("Download Qwen"); return }
+        val model = QwenModel.selectedState
+        if (!model.ready) { showModelNote(if (model.downloading) "Downloading Qwen…" else "Download Qwen"); return }
         val decoder = decoder ?: return
         val candidates = decoder.decodeScored(path, keyCenters, keyWidth, 24, includeFrequency = false)
         if (candidates.isEmpty()) return

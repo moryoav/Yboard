@@ -28,7 +28,9 @@ class KeyboardSmokeInstrumentation : Instrumentation() {
             if (mode == "qwen_core") {
                 result.putString("result", QwenChecks.core(targetContext, args.getString("model")))
             } else if (mode == "qwen_download") {
-                result.putString("result", QwenChecks.download(targetContext))
+                result.putString("result", QwenChecks.download(targetContext, args.getString("variant")))
+            } else if (mode == "qwen_switch") {
+                result.putString("result", QwenChecks.switch(this, args.getString("model")))
             } else if (mode == "prediction_ime") {
                 result.putString("result", PredictionImeChecks(this).run())
             } else if (mode == "update_notifications") {

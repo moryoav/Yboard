@@ -13,7 +13,12 @@ import java.util.concurrent.TimeUnit
 
 /** One resident model and a bounded latest-request queue. Never calls a cloud API. */
 object LocalQwen {
-    data class Status(val loaded: Boolean = false, val loading: Boolean = false, val error: String? = null)
+    data class Status(
+        val loaded: Boolean = false,
+        val loading: Boolean = false,
+        val error: String? = null,
+        val model: QwenModel.Variant? = null,
+    )
     data class Result(val words: List<String>, val elapsedMs: Long)
     private val mutable = MutableStateFlow(Status())
     val status = mutable.asStateFlow()
@@ -23,6 +28,7 @@ object LocalQwen {
     @Volatile private var ticket = 0L
     private var onRankCancelled: (() -> Unit)? = null
     private var handle = 0L // worker thread only
+    private var loadedModel: QwenModel.Variant? = null // worker thread only
     @Volatile private var clearPending = false
     @Volatile private var releasePending = false
 
@@ -34,19 +40,28 @@ object LocalQwen {
         onRankCancelled = null
         return ticket
     }
-    private fun ensureLoaded() {
+    private fun ensureLoaded(model: QwenModel.Variant) {
         applyMaintenance()
-        check(QwenModel.state.value.ready) { "Download Qwen in Yboard → Typing to enable suggestions and swipe typing." }
-        if (handle != 0L) return
-        mutable.value = Status(loading = true)
-        handle = QwenNative.load(QwenModel.file().absolutePath, (Runtime.getRuntime().availableProcessors() - 1).coerceIn(1, 4))
+        check(QwenModel.state.value[model].ready) { "Download the model under Yboard → Typing." }
+        if (loadedModel == model) return
+        closeModel()
+        mutable.value = Status(loading = true, model = model)
+        handle = QwenNative.load(QwenModel.file(model).absolutePath, (Runtime.getRuntime().availableProcessors() - 1).coerceIn(1, 4))
         check(handle != 0L) { "Qwen could not be loaded on this device." }
-        mutable.value = Status(loaded = true)
+        loadedModel = model
+        mutable.value = Status(loaded = true, model = model)
     }
     fun warmUp(context: Context) {
         init(context)
-        if (!QwenModel.state.value.ready || mutable.value.loaded || mutable.value.loading) return
-        worker.execute { runCatching { ensureLoaded() }.onFailure { mutable.value = Status(error = it.message ?: "Qwen could not be loaded") } }
+        val catalog = QwenModel.state.value
+        val model = catalog.selected
+        val current = mutable.value
+        if (!catalog[model].ready || current.model == model && (current.loaded || current.loading)) return
+        worker.execute {
+            if (model != QwenModel.selected) return@execute
+            runCatching { ensureLoaded(model) }
+                .onFailure { mutable.value = Status(error = it.message ?: "Qwen could not be loaded", model = model) }
+        }
     }
     @Synchronized fun clearContext() {
         clearPending = true
@@ -58,11 +73,15 @@ object LocalQwen {
         cancel()
         worker.execute { applyMaintenance() }
     }
+    private fun closeModel() {
+        if (handle != 0L) QwenNative.close(handle)
+        handle = 0L
+        loadedModel = null
+    }
     private fun applyMaintenance() {
         synchronized(this) {
             if (releasePending) {
-                if (handle != 0L) QwenNative.close(handle)
-                handle = 0L
+                closeModel()
                 releasePending = false
                 clearPending = false
                 mutable.value = Status()
@@ -74,28 +93,31 @@ object LocalQwen {
     }
 
     fun prepare(context: String): Long {
+        val model = QwenModel.selected
         val id = cancel()
         worker.execute {
             if (id != ticket) return@execute
-            runCatching { ensureLoaded(); if (id == ticket) QwenNative.prepare(handle, context, id) }
-                .onFailure { if (id == ticket) mutable.value = Status(loaded = handle != 0L, error = it.message) }
+            runCatching { ensureLoaded(model); if (id == ticket) QwenNative.prepare(handle, context, id) }
+                .onFailure { if (id == ticket) mutable.value = Status(loaded = loadedModel == model, error = it.message, model = model) }
         }
         return id
     }
 
     fun predict(context: String, prefix: String, callback: (kotlin.Result<Result>) -> Unit): Long {
+        val model = QwenModel.selected
         val id = cancel()
         worker.execute {
             if (id != ticket) return@execute
             val result = runCatching {
                 val start = SystemClock.elapsedRealtime()
-                ensureLoaded()
+                ensureLoaded(model)
                 val words = QwenNative.predict(handle, context, prefix, id).toList()
                 Result(words, SystemClock.elapsedRealtime() - start)
             }
             main.post {
                 if (id == ticket) {
-                    mutable.value = Status(loaded = handle != 0L, error = result.exceptionOrNull()?.message)
+                    mutable.value = Status(loaded = mutable.value.loaded && mutable.value.model == model,
+                        error = result.exceptionOrNull()?.message, model = model)
                     callback(result)
                 }
             }
@@ -104,17 +126,19 @@ object LocalQwen {
     }
 
     @Synchronized fun rank(context: String, words: List<String>, callback: (kotlin.Result<DoubleArray>) -> Unit): Long {
+        val model = QwenModel.selected
         val id = cancel()
         onRankCancelled = { callback(kotlin.Result.failure(CancellationException())) }
         worker.execute {
             if (id != ticket) return@execute
-            val result = runCatching { ensureLoaded(); QwenNative.score(handle, context, words.toTypedArray(), id) }
+            val result = runCatching { ensureLoaded(model); QwenNative.score(handle, context, words.toTypedArray(), id) }
             main.post {
                 synchronized(this) {
                     if (id != ticket) return@post
                     onRankCancelled = null
                 }
-                mutable.value = Status(loaded = handle != 0L, error = result.exceptionOrNull()?.message)
+                mutable.value = Status(loaded = mutable.value.loaded && mutable.value.model == model,
+                    error = result.exceptionOrNull()?.message, model = model)
                 callback(result)
             }
         }

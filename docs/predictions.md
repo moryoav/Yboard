@@ -1,10 +1,11 @@
 # Local word predictions
 
-Typing and swipe ranking use Qwen3-0.6B-Base, quantized to Q4_K_M, through a pinned
-llama.cpp runtime. No prediction text goes to an API. The one-time model download is
-397 MB and is verified by size and SHA-256 before activation. It lives in private,
-no-backup storage and survives app updates. The Typing and AI models screens show
-its download, pause, resume and ready states.
+Typing and swipe ranking use the model selected under **Typing → Local predictions**
+or **AI models → Local predictions**. Qwen3-0.6B-Base is the default. Download
+Qwen3.5-0.8B-Base and tap its row to use it. Both downloads stay in private,
+no-backup storage across app updates, and the selection survives app restarts.
+Only the selected model runs in memory. Both are quantized to Q4_K_M, verified
+by size and SHA-256, and run through the pinned llama.cpp runtime on the device.
 
 All word suggestions come from Qwen. The old dictionary, phrase corpus, learned
 pair ranking, cloud prediction requests and emoji suggestion fallback are disconnected
@@ -40,25 +41,30 @@ and predictions are not logged or persisted by the model engine.
 
 ## Model provenance and reproduction
 
-- Original model: [Qwen/Qwen3-0.6B-Base](https://huggingface.co/Qwen/Qwen3-0.6B-Base/tree/da87bfb608c14b7cf20ba1ce41287e8de496c0cd), Apache 2.0.
+- Original models are [Qwen/Qwen3-0.6B-Base](https://huggingface.co/Qwen/Qwen3-0.6B-Base/tree/da87bfb608c14b7cf20ba1ce41287e8de496c0cd)
+  and [Qwen3.5-0.8B-Base](https://huggingface.co/Qwen/Qwen3.5-0.8B-Base/tree/dc7cdfe2ee4154fa7e30f5b51ca41bfa40174e68), Apache 2.0.
 - Runtime and converter: [llama.cpp](https://github.com/ggml-org/llama.cpp/tree/2d8a32502909ca065c41c4cf5f2fb1c427c047fc), MIT.
 - Derivative: original safetensors converted to F16 GGUF, then Q4_K_M with the pinned converter/quantizer. No third-party weights.
-- Size: 396,704,544 bytes. SHA-256: `ea719cfda3898e7eaf3fcebef8250857b9c7e3152b54632cf0293fdc6069cd58`.
+- Qwen3-0.6B-Base is 396,704,544 bytes. SHA-256 `ea719cfda3898e7eaf3fcebef8250857b9c7e3152b54632cf0293fdc6069cd58`.
+- Qwen3.5-0.8B-Base is 547,308,064 bytes. SHA-256 `250053ed8e33a8ddc4e4516cbfe06b51f2cc6c77da298c1c9a1e72c6df012123`.
 - Model and runtime licenses ship in `assets/licenses/`. Conversion changes the representation, not the model weights by training.
 
 Run `python scripts/Prepare-Qwen.py C:/dev/artifacts/Yboard/qwen-rebuild` with Python
 3.11+, PyTorch, transformers 4.57.6, safetensors, sentencepiece and gguf 0.19.0 installed.
-Build `llama-quantize` from the extracted pinned runtime, then run the two commands
-printed by that script. The script keeps all large artifacts outside the Git workspace.
-The release publisher requires the exact pinned model and verifies GitHub's uploaded
-asset digest before making v1.9.0 public. Later app versions reuse that immutable asset.
+For Qwen3.5, pass `--qwen35` and use a separate output directory. Run the two commands
+printed by the script. The release models were quantized with the llama.cpp Windows
+CPU build b12359. The script keeps large artifacts outside the Git workspace.
+The release publisher verifies GitHub's uploaded model asset digest before publication.
+The app downloads Qwen3 from v1.9.0 and Qwen3.5 from v1.10.0.
 
 ## Validation
 
 `LocalPredictionTest` checks full sentence preservation, Hebrew/English boundaries,
 absolute cursor anchors, frequency-independent geometry and model/shape ranking.
 `qwen_core` instrumentation runs actual local English/Hebrew completion and ambiguous
-swipe word scoring. `prediction_ime` drives the real service in a separate synthetic
-editor to check completion, consecutive suggestion acceptance, literal typing, full
-context, glide ranking, cancellation and private/password fields. These fixtures do not
-establish broad language accuracy. Phone latency must be measured on the actual device.
+swipe word scoring. `qwen_switch` checks both engines, cancellation during a switch and
+availability of both downloaded models. `prediction_ime` drives the real service in a
+separate synthetic editor to check completion, consecutive suggestion acceptance,
+literal typing, full context, glide ranking, cancellation and private/password fields.
+These fixtures do not establish broad language accuracy. Phone latency must be measured
+on the actual device.

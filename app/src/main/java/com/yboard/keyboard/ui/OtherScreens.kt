@@ -242,7 +242,7 @@ fun AboutScreen(onBack: () -> Unit, updateCheckRequested: Boolean, onUpdateCheck
                     "Dictionaries: Android Open Source Project keyboard word lists, Apache License 2.0. " +
                     "Includes Dictionaries © Lexiteria LLC. Used by permission.\n" +
                     "Emoji search words: Unicode CLDR, Unicode License v3.\n" +
-                    "Local model: Qwen3-0.6B-Base, Apache License 2.0, converted to Q4_K_M.\n" +
+                    "Local models: Qwen3-0.6B-Base and Qwen3.5-0.8B-Base, Apache License 2.0, converted to Q4_K_M.\n" +
                     "Inference runtime: llama.cpp, MIT License.",
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
