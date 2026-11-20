@@ -37,6 +37,7 @@ object OpenAi {
             "even when the speaker does not name it. Use the meaning of the words to place commas and sentence breaks. " +
             "Use commas for lists and introductory clauses, periods after complete statements, and question marks after questions. " +
             "Keep a sentence together through hesitations and audio cuts when the words continue the same thought. " +
+            "Decide whether a thought is complete from the words, including words that follow a hesitation. " +
             "Capitalize sentence starts, names, acronyms, and I. Continue a mid-sentence fragment in lowercase. Follow this style: " +
             "I sent the message using voice typing. If it rains, I'll stay home. I bought milk, bread, and eggs. Are you coming? " +
             "אם ירד גשם, אשאר בבית. קניתי חלב, לחם וביצים. אתה מגיע? " +

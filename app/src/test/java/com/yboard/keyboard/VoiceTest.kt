@@ -7,7 +7,6 @@ import com.yboard.keyboard.voice.OpenAi
 import com.yboard.keyboard.voice.Vad
 import com.yboard.keyboard.voice.VoiceEdit
 import com.yboard.keyboard.voice.VoiceEdits
-import com.yboard.keyboard.voice.VoiceOptions
 import com.yboard.keyboard.voice.Wav
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -33,18 +32,22 @@ class VoiceTest {
     }
 
     @Test
-    fun pauseDetectionFindsEachPhrase() {
+    fun longHesitationsKeepTheSameTurnWithoutStreamingTheWholePause() {
         val vad = Vad()
         val c = Counter()
         repeat(50) { vad.process(noise(40), c) }            // 1 s of room noise
         repeat(40) { vad.process(voice(6000, it), c) }      // 0.8 s of talking
-        repeat(40) { vad.process(noise(40), c) }            // pause
+        repeat(275) { vad.process(noise(40), c) }           // 5.5 s hesitation
+        assertEquals(0, c.ends)
+        assertFalse(vad.inSpeech)
+        assertTrue("sent ${c.audio} frames", c.audio in 40..(40 + 10 + 12))
+        repeat(30) { vad.process(voice(5000, it), c) }
+        repeat(140) { vad.process(noise(40), c) }
+        assertEquals(0, c.ends)
+        assertTrue(c.audio >= 70)
+        vad.finish(c)
+        vad.finish(c)
         assertEquals(1, c.ends)
-        // The talking, plus a little before (pre-roll) and the pause that ended it.
-        assertTrue("sent ${c.audio} frames", c.audio in 40..(40 + 15 + 25 + 1))
-        repeat(30) { vad.process(voice(5000, it), c) }      // second phrase
-        repeat(40) { vad.process(noise(40), c) }
-        assertEquals(2, c.ends)
     }
 
     @Test
@@ -53,9 +56,7 @@ class VoiceTest {
         assertEquals(15, LocalCommands.quickEndFrames("Delete that"))        // "delete that word" might follow
         assertEquals(9, LocalCommands.quickEndFrames("question mark"))
         assertEquals(0, LocalCommands.quickEndFrames("I went to the"))
-        // The VAD ends a command phrase after the short pause instead of the normal one.
-        val options = VoiceOptions()
-        val vad = Vad(endFrames = options.endFrames, continuationEndFrames = options.continuationEndFrames)
+        val vad = Vad()
         val c = Counter()
         repeat(50) { vad.process(noise(40), c) }
         repeat(30) { vad.process(voice(6000, it), c) }
@@ -65,21 +66,31 @@ class VoiceTest {
     }
 
     @Test
-    fun shortHesitationStaysInTheSameAudioTurn() {
-        val options = VoiceOptions()
-        val vad = Vad(endFrames = options.endFrames, continuationEndFrames = options.continuationEndFrames)
+    fun lateCommandHintClosesAnOpenTurnDuringSilence() {
+        val vad = Vad()
         val c = Counter()
         repeat(30) { vad.process(voice(6000, it), c) }
-        repeat(31) { vad.process(noise(40), c) } // 620 ms, longer than the normal pause
+        repeat(100) { vad.process(noise(40), c) }
         assertEquals(0, c.ends)
-        repeat(30) { vad.process(voice(6000, it), c) }
-        vad.transcriptEndsSentence = true
-        repeat(options.endFrames) { vad.process(noise(40), c) }
-        assertEquals(1, c.ends)
-        repeat(30) { vad.process(voice(6000, it), c) }
-        repeat(options.continuationEndFrames - 1) { vad.process(noise(40), c) }
-        assertEquals(1, c.ends)
+        vad.quickEndFrames = LocalCommands.quickEndFrames("Delete that")
         vad.process(noise(40), c)
+        assertEquals(1, c.ends)
+        repeat(30) { vad.process(voice(6000, it), c) }
+        repeat(100) { vad.process(noise(40), c) }
+        assertEquals(1, c.ends)
+    }
+
+    @Test
+    fun bufferLimitKeepsAudioFromTheNextTurnAndTimeoutRemainsSeparate() {
+        val vad = Vad(maxTurnFrames = 20, idleFrames = 25)
+        val c = Counter()
+        repeat(27) { vad.process(voice(6000, it), c) }
+        assertEquals(27, c.audio)
+        assertEquals(1, c.ends)
+        repeat(25) { vad.process(noise(40), c) }
+        assertEquals(1, c.ends)
+        assertEquals(1, c.silences)
+        vad.finish(c)
         assertEquals(2, c.ends)
     }
 
@@ -140,6 +151,7 @@ class VoiceTest {
         listOf(
             "I went to the store yesterday with my friends", "hi", "see you soon",
             "we had a great time at the party last night", "אני הולך לבית הספר מחר בבוקר",
+            "I need to replace the battery", "Instead, let's stay home", "Change is always hard",
         ).forEach { assertFalse(it, VoiceEdits.looksLikeCommand(it)) }
     }
 
@@ -233,6 +245,9 @@ class VoiceTest {
         assertEquals("hi", LocalCommands.preview("hi question", smart = true))   // "mark" may follow
         assertEquals("New car", LocalCommands.preview("New car", smart = true))
         assertEquals("שלום", LocalCommands.preview("שלום סימן", smart = true))
+        assertEquals("I typed this.", LocalCommands.preview("I typed this. Delete that.", smart = true))
+        assertEquals("One sentence. Another.", LocalCommands.preview("One sentence. Another. Send.", smart = true))
+        assertEquals("I will replace the batteries.", LocalCommands.preview("I will replace the batteries.", smart = true))
     }
 
     @Test

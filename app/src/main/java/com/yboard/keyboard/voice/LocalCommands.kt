@@ -150,11 +150,12 @@ object LocalCommands {
      * out of the field because it sounds like a command.
      */
     fun preview(spoken: String, smart: Boolean): String? {
-        val t = spoken.trim()
+        val raw = spoken.trim()
+        val t = if (smart) trailingEdit(raw)?.first ?: trailingSend(raw) ?: raw else raw
         if (t.isEmpty()) return ""
         if (!smart) return t
         if (mightBeCommand(t)) return null
-        if (smart && VoiceEdits.looksLikeCommand(t)) return null
+        if (VoiceEdits.looksLikeCommand(t, preview = true)) return null
         val words = t.split(Regex("\\s+")).toMutableList()
         while (words.isNotEmpty()) {
             val last = words.last().lowercase().trim { !it.isLetter() }
@@ -271,6 +272,33 @@ object LocalCommands {
 
     private fun isInsert(n: String) = n in newLine || n in newParagraph || n in punctuation
     private fun isKnown(n: String) = n in allPhrases
+
+    private val sentenceBreak = Regex("(?<=[.!?…])[ \\t]+|[\\r\\n]+[ \\t]*")
+    private val abbreviations = setOf("e.g.", "i.e.", "mr.", "mrs.", "ms.", "dr.", "prof.")
+    private val initial = Regex("[A-Za-z]\\.")
+
+    private fun lastSentenceBreak(text: String) = sentenceBreak.findAll(text).lastOrNull { match ->
+        val lastWord = text.substring(0, match.range.first).takeLastWhile { !it.isWhitespace() }
+        lastWord.lowercase() !in abbreviations && !initial.matches(lastWord)
+    }
+
+    /** A spoken edit can follow a complete sentence in the same transcription turn. */
+    fun trailingEdit(spoken: String): Pair<String, String>? {
+        val body = spoken.trimEnd { it.isWhitespace() || it in ".!?…" }
+        val separator = lastSentenceBreak(body) ?: return null
+        val tail = spoken.substring(separator.range.last + 1)
+        val command = normalize(tail)
+        if (command in send || command in sendMisheard || command in punctuation ||
+            command in newLine || command in newParagraph) return null
+        if (!isKnown(command) && !VoiceEdits.looksLikeCommand(tail)) return null
+        return spoken.substring(0, separator.range.first) to tail
+    }
+
+    /** The last sentence within dictation added in this turn, including its separating space. */
+    fun latestDictatedSentence(spoken: String): String {
+        val separator = lastSentenceBreak(spoken.trimEnd()) ?: return spoken
+        return spoken.substring(separator.range.first)
+    }
 
     /**
      * A command that [n] is a near-miss of ("delete hat" -> "delete that", "new lane" -> "new line").

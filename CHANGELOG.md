@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.9.5
+
+- Kept dictation together across pauses so automatic punctuation can use the words on both sides of a hesitation.
+- Kept pauses for recognized voice commands and the optional microphone timeout.
+
 ## 1.9.4
 
 - Kept short hesitations in the same voice transcription segment when a sentence appears unfinished.

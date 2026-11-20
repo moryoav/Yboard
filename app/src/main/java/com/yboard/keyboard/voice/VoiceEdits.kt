@@ -73,28 +73,26 @@ object VoiceEdits {
 
     // Words that mean the phrase is probably an editing command the AI should handle.
     // (Simple ones like "delete that" and spoken punctuation are handled by LocalCommands.)
-    private val englishCommandWords = listOf(
+    private val commandStarts = listOf(
         "delete", "remove", "erase", "undo", "scratch", "backspace", "take back", "take that", "take out",
-        "never mind", "nevermind", "get rid", "replace", "change", "instead", "capital", "capitalize", "caps",
-        "uppercase", "lowercase", "quote", "quotes", "quotation", "emoji", "smiley", "spell", "fix that",
-        "correct that", "last word", "last sentence", "that word", "brackets", "parenthesis", "translate",
-        "insert", "add a", "add an", "put a", "put an", "around", "last two", "last three", "last few",
-    )
-    private val hebrewCommandWords = listOf(
-        "מחק", "מחקי", "למחוק", "מחיקה", "בטל", "ביטול", "החלף", "תחליף", "תחליפי", "תשנה", "תשני",
-        "מירכאות", "גרשיים", "סמיילי", "אימוג", "תתקן", "תקן את", "המילה האחרונה", "המשפט האחרון", "תתרגם",
+        "never mind", "nevermind", "get rid", "capitalize", "make that", "make the last",
+        "uppercase", "lowercase", "quote", "spell", "fix that", "correct that", "translate",
+        "insert", "add a", "add an", "put a", "put an",
+        "מחק", "מחקי", "למחוק", "בטל", "החלף", "תחליף", "תחליפי", "תשנה", "תשני", "תתקן", "תקן את", "תתרגם",
         "תוסיף", "תשים", "תוריד", "תמחוק",
     )
+    private val politeStart = Regex("^(?:(?:please|can you|could you|would you|בבקשה) )+")
+    private val wordReplacement = Regex("(?:replace .+ (?:with|by)|change .+ (?:to|into))(?: (.+))?")
 
     /**
-     * True when [spoken] is probably an editing command ("replace Monday with Tuesday",
-     * "תחליף את X ב Y"). Only these go to the AI, so normal dictation is typed right away.
+     * An edit must start like an instruction. Words such as "replace" inside ordinary
+     * dictation should neither interrupt the audio turn nor hide the live transcript.
      */
-    fun looksLikeCommand(spoken: String): Boolean {
-        val norm = spoken.lowercase().replace(Regex("[\\p{P}\\p{S}]"), " ").replace(Regex("\\s+"), " ").trim()
-        if (norm.isEmpty()) return false
-        val padded = " $norm "
-        if (englishCommandWords.any { padded.contains(" $it ") }) return true
-        return hebrewCommandWords.any { norm.contains(it) }
+    fun looksLikeCommand(spoken: String, preview: Boolean = false): Boolean {
+        val words = spoken.lowercase().replace(Regex("[\\p{P}\\p{S}]"), " ")
+            .replace(Regex("\\s+"), " ").trim().replaceFirst(politeStart, "")
+        val replacement = wordReplacement.matchEntire(words)
+        return (replacement != null && (preview || replacement.groups[1] != null)) ||
+            commandStarts.any { words == it || words.startsWith("$it ") }
     }
 }

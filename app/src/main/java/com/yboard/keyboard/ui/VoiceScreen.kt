@@ -237,17 +237,19 @@ fun VoiceScreen(settings: YboardSettings, onBack: () -> Unit) {
                 TranscriptionQuality.BALANCED -> "Balances quick results with more context for accuracy."
                 TranscriptionQuality.ACCURATE -> "Waits for more audio context. Words may take longer to appear."
             })
-            SliderRow("Phrase pause", settings.voicePauseMs.toFloat(), 250f..1500f,
-                "${settings.voicePauseMs} ms", steps = 24) { value ->
-                Prefs.update { it.copy(voicePauseMs = (value / 50).roundToInt() * 50) }
+            if (settings.voiceCommands) {
+                SliderRow("Voice command pause", settings.voicePauseMs.toFloat(), 250f..1500f,
+                    "${settings.voicePauseMs} ms", steps = 24) { value ->
+                    Prefs.update { it.copy(voicePauseMs = (value / 50).roundToInt() * 50) }
+                }
+                HintText("A pause can finish a recognized voice command. Short commands may run sooner.")
             }
-            HintText("Yboard can wait a little longer when a sentence sounds unfinished. Clear commands can finish sooner.")
             val silenceChoices = listOf(8, 15, 30, 0)
             ChipRow("Stop after silence", listOf("8 sec", "15 sec", "30 sec", "Never"),
                 silenceChoices.indexOf(settings.voiceSilenceSeconds)) { i ->
                 Prefs.update { it.copy(voiceSilenceSeconds = silenceChoices[i]) }
             }
-            HintText("Never keeps the mic on until you stop it, type a key, move the cursor, or close the keyboard.")
+            HintText("Pauses during dictation keep the same audio context. This setting controls when the mic stops.")
         }
 
         Section("How to use it", searchable = true) {

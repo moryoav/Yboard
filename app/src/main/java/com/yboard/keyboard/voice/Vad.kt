@@ -5,16 +5,15 @@ import kotlin.math.max
 import kotlin.math.sqrt
 
 /**
- * Finds speech in microphone audio by loudness, and where each phrase ends (a short pause).
- * Works on 20 ms frames. It adapts to the room's background noise.
+ * Finds speech in 20 ms microphone frames and skips extended quiet audio. Multiple bursts of
+ * speech belong to the same transcription turn, so the model can punctuate the complete thought.
  */
 class Vad(
     private val startFrames: Int = 3,      // 60 ms of voice starts a phrase
-    private val endFrames: Int = 25,       // 500 ms of quiet ends it
-    private val prerollFrames: Int = 15,   // keep 300 ms from before the voice started
-    private val maxPhraseFrames: Int = 750, // cut very long phrases at 15 s
+    private val prerollFrames: Int = 10,   // keep 200 ms from before each burst of speech
+    private val tailFrames: Int = 12,      // keep 240 ms to capture quiet ends of words
+    private val maxTurnFrames: Int = 3000, // bound buffered audio to about 2.9 MB of PCM
     private val idleFrames: Int = 400,     // 8 s with nothing said
-    private val continuationEndFrames: Int = endFrames,
 ) {
     interface Sink {
         fun audio(frame: ShortArray)
@@ -28,13 +27,12 @@ class Vad(
     var noiseDb = -60.0
         private set
 
-    /** Set while the words so far are a whole command: a shorter pause ends the phrase. */
+    /** A recognized command can close a turn after a short pause. Zero keeps dictation open. */
     @Volatile var quickEndFrames: Int = 0
-    @Volatile var transcriptEndsSentence: Boolean = false
 
     private var loudRun = 0
     private var quietRun = 0
-    private var phraseFrames = 0
+    private var turnFrames = 0
     private var idle = 0
     private val preroll = ArrayDeque<ShortArray>()
 
@@ -43,6 +41,11 @@ class Vad(
         sink.level(((db + 58.0) / 40.0).coerceIn(0.0, 1.0).toFloat())
         val threshold = max(noiseDb + 11.0, -50.0)
         val loud = db > threshold
+        quietRun = if (loud) 0 else quietRun + 1
+        if (inSpeech && quietRun > tailFrames) {
+            inSpeech = false
+            loudRun = 0
+        }
         if (!inSpeech) {
             preroll.addLast(frame.copyOf())
             if (preroll.size > prerollFrames) preroll.removeFirst()
@@ -55,30 +58,34 @@ class Vad(
             }
             if (loudRun >= startFrames) {
                 inSpeech = true
-                quietRun = 0
-                phraseFrames = preroll.size
+                turnFrames += preroll.size
                 preroll.forEach { sink.audio(it) }
                 preroll.clear()
-                idle = 0
-            } else {
-                idle++
-                if (idleFrames > 0 && idle == idleFrames) sink.longSilence()
             }
         } else {
             sink.audio(frame)
-            phraseFrames++
-            if (loud) quietRun = 0 else quietRun++
-            val needed = quickEndFrames.takeIf { it > 0 }
-                ?: if (transcriptEndsSentence) endFrames else continuationEndFrames
-            if (quietRun >= needed || phraseFrames >= maxPhraseFrames) {
-                inSpeech = false
-                quickEndFrames = 0
-                transcriptEndsSentence = false
-                loudRun = 0
-                idle = 0
-                sink.phraseEnd()
-            }
+            turnFrames++
         }
+        val commandPause = quickEndFrames
+        if (turnFrames >= maxTurnFrames || (commandPause > 0 && quietRun >= commandPause)) {
+            finish(sink)
+        }
+        if (idleFrames > 0) {
+            idle = if (inSpeech) quietRun else idle + 1
+            if (idle == idleFrames) sink.longSilence()
+        }
+    }
+
+    /** Closes buffered speech even if recording stops during a hesitation. */
+    fun finish(sink: Sink) {
+        quickEndFrames = 0
+        if (turnFrames == 0) return
+        turnFrames = 0
+        if (quietRun > 0) {
+            inSpeech = false
+            loudRun = 0
+        }
+        sink.phraseEnd()
     }
 
     companion object {

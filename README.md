@@ -53,9 +53,10 @@ A clean, customizable Android keyboard for English and Hebrew, styled after Gboa
   excluded from backups, never logged; API-key-looking text is kept out of clipboard history),
   allow the microphone, pick languages, smart commands on/off.
 - Keyboard mic: live words via Realtime transcription (`gpt-live-transcribe`, WebSocket,
-  24 kHz PCM, client-side pause detection in `voice/Vad.kt`), shown underlined as you talk.
-  If live transcription is unavailable it falls back to one recording per phrase (`gpt-transcribe`).
-- Listening preferences: Faster / Balanced / More accurate transcription, a 250–1500 ms phrase pause,
+  24 kHz PCM), shown underlined as you talk. Hesitations stay in the same transcription turn so the
+  model can place punctuation using the words on both sides. If live transcription is unavailable,
+  Yboard transcribes buffered recordings with `gpt-transcribe`.
+- Listening preferences: Faster / Balanced / More accurate transcription, a 250–1500 ms voice command pause,
   and automatic stop after 8, 15 or 30 seconds of silence, or Never. Balanced and 15 seconds are the defaults.
 - Unfinished phrases stay in memory until confirmed, so slow or disconnected live sessions can recover them in order.
   Tapping the mic waits for pending words; typing a key, moving the cursor or closing the keyboard ends immediately.

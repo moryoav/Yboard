@@ -62,10 +62,11 @@ object VoiceRegression {
         val messages = ArrayList<String>()
         val results = ArrayDeque<Any>()
         var fileCalls = 0
+        val recordingContexts = ArrayList<String>()
         var sends = 0
         var commandCalls = 0
         val commits = ArrayList<String>()
-        val pauseHints = ArrayList<Pair<Int, Boolean>>()
+        val pauseHints = ArrayList<Int>()
         lateinit var micListener: MicStream.Listener
         var micPending = false
         var micStopped = false
@@ -85,8 +86,8 @@ object VoiceRegression {
                             if (micPending) { micPending = false; listener.onPhraseEnd() }
                             listener.onMicStopped()
                         }
-                        override fun setPauseHint(commandFrames: Int, endsSentence: Boolean) {
-                            pauseHints.add(commandFrames to endsSentence)
+                        override fun setCommandPause(frames: Int) {
+                            pauseHints.add(frames)
                         }
                     }
                 }
@@ -101,6 +102,7 @@ object VoiceRegression {
                 override fun transcribe(key: String, wav: ByteArray, languages: List<String>, context: String,
                                         vocabulary: List<String>, pairs: List<Pair<String, String>>, onlyLanguage: String?): String {
                     fileCalls++
+                    recordingContexts.add(context)
                     check(wav.size > 44)
                     val result = results.removeFirst()
                     if (result is Throwable) throw result
@@ -157,12 +159,12 @@ object VoiceRegression {
         }, smart = false)
         scenario({ f ->
             f.audio(); f.voice.onDelta("one", "I am sending this")
-            check(f.pauseHints == listOf(0 to false))
+            check(f.pauseHints == listOf(0))
             f.phrase(); f.voice.onDelta("one", " message.")
-            check(f.pauseHints == listOf(0 to false)) { "A committed turn changed the mic pause" }
+            check(f.pauseHints == listOf(0)) { "A committed turn changed the mic pause" }
             f.finish("one", "I am sending this message")
             f.audio(); f.voice.onDelta("two", "Using the voice keyboard.")
-            check(f.pauseHints.last() == (0 to true))
+            check(f.pauseHints.last() == 0)
             check(f.text() == "I am sending this message using the voice keyboard.")
             f.phrase(); f.finish("two", "Using the voice keyboard.")
             f.phrase(); f.finish("three", "It capitalized")
@@ -175,6 +177,67 @@ object VoiceRegression {
             f.voice.onClosed("offline", 0); f.clock.advance()
             check(f.fileCalls == 1 && f.text() == "I'm dictating using the keyboard")
         }, smart = false)
+        scenario({ f ->
+            f.audio()
+            f.voice.onDelta("hesitation", "Could you pick up the.")
+            f.clock.advance(6500)
+            check(f.commits.isEmpty() && f.pauseHints.last() == 0)
+            f.audio()
+            f.voice.onDelta("hesitation", " Bread, milk and eggs?")
+            f.voice.stop(); f.clock.advance()
+            check(f.commits.size == 1)
+            f.finish("hesitation", "Could you pick up the bread, milk and eggs?")
+            check(f.text() == "Could you pick up the bread, milk and eggs?" && !f.voice.isActive)
+        })
+        scenario({ f ->
+            val vad = Vad(idleFrames = 0)
+            val sink = object : Vad.Sink {
+                override fun audio(frame: ShortArray) { f.micListener.onAudio(Wav.toBytes(frame)) }
+                override fun phraseEnd() { f.micListener.onPhraseEnd() }
+                override fun longSilence() { error("Auto-stop was disabled") }
+                override fun level(level: Float) {}
+            }
+            val loud = ShortArray(480) { 4000 }
+            val quiet = ShortArray(480)
+            f.voice.onClosed("offline", 0)
+            repeat(30) { vad.process(loud, sink) }
+            repeat(300) { vad.process(quiet, sink) }
+            repeat(30) { vad.process(loud, sink) }
+            repeat(300) { vad.process(quiet, sink) }
+            f.clock.advance()
+            check(f.fileCalls == 0)
+            f.results.add("We found a quieter place to work.")
+            vad.finish(sink); f.voice.stop(); f.clock.advance()
+            check(f.fileCalls == 1 && f.text() == "We found a quieter place to work." && !f.voice.isActive)
+        }, smart = false)
+        scenario({ f ->
+            f.phrase(); f.voice.onCommitted("one")
+            f.phrase(); f.voice.onCommitted("two")
+            f.results.add("I am taking the train")
+            f.results.add("And then walking home.")
+            f.voice.onClosed("offline", 0); f.clock.advance()
+            check(f.recordingContexts == listOf("", "I am taking the train"))
+            check(f.text() == "I am taking the train and then walking home.")
+        }, smart = false)
+        scenario({ f ->
+            f.audio(); f.voice.onDelta("one", "The first sentence. The second sentence. Delete that.")
+            check(f.pauseHints.last() > 0)
+            check(f.text() == "The first sentence. The second sentence.")
+            f.phrase(); f.finish("one", "The first sentence. The second sentence. Delete that.")
+            check(f.text() == "The first sentence.")
+            f.phrase(); f.finish("two", "Delete that.")
+            check(f.text().isEmpty() && f.commandCalls == 0)
+            f.phrase(); f.finish("three", "Keep the first sentence. Lose the second, scratch that.")
+            check(f.text() == "Keep the first sentence.")
+        })
+        scenario({ f ->
+            f.audio()
+            f.voice.onDelta("one", "Here is the message. Send.")
+            check(f.text() == "Here is the message." && f.pauseHints.last() > 0)
+            f.phrase(); f.finish("one", "Here is the message. Send.")
+            f.clock.advance(3000)
+            check(f.sends == 1 && f.commandCalls == 0)
+        })
         scenario({ f ->
             f.phrase(); f.voice.onCommitted("one"); f.voice.onDelta("one", "First")
             f.phrase(); f.voice.onCommitted("two"); f.voice.onCompleted("two", "Second.")

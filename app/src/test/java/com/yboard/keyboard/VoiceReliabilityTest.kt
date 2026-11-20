@@ -20,7 +20,7 @@ class VoiceReliabilityTest {
         val loaded = YboardSettings.fromJson(settings.toJson())
         assertEquals(settings, loaded)
         assertEquals(0, loaded.voiceOptions.idleFrames)
-        assertEquals(62, loaded.voiceOptions.endFrames)
+        assertEquals(62, loaded.voiceOptions.commandPauseFrames)
     }
 
     @Test fun invalidPersistedTimingsAreBounded() {

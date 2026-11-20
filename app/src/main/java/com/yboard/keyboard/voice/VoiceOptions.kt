@@ -10,9 +10,7 @@ data class VoiceOptions(
     /** Zero keeps listening until the mic is stopped manually. */
     val silenceSeconds: Int = 15,
 ) {
-    val endFrames: Int get() = pauseMs.coerceIn(250, 1500) / 20
-    /** Allow up to 400 ms for speech that may still be part of the same sentence. */
-    val continuationEndFrames: Int get() = (endFrames + 20).coerceAtMost(1500 / 20)
+    val commandPauseFrames: Int get() = pauseMs.coerceIn(250, 1500) / 20
     val idleFrames: Int get() = if (silenceSeconds == 0) 0 else silenceSeconds.coerceIn(8, 60) * 50
 }
 

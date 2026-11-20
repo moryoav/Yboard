@@ -7,7 +7,7 @@ import android.media.MediaRecorder
 
 /**
  * Records the microphone at 24 kHz on its own thread and feeds it through [Vad].
- * Only speech (plus a little before it) is passed on, so silence isn't sent to OpenAI.
+ * Short tails and beginnings of speech are kept, and extended silence is skipped.
  * Listener calls come from the recording thread.
  */
 class MicStream(private val listener: Listener, private val options: VoiceOptions = VoiceOptions()) : VoiceRecorder {
@@ -29,11 +29,8 @@ class MicStream(private val listener: Listener, private val options: VoiceOption
     /** Someone is talking right now. */
     override val speaking: Boolean get() = vad?.inSpeech == true
 
-    override fun setPauseHint(commandFrames: Int, endsSentence: Boolean) {
-        vad?.takeIf { it.inSpeech }?.let {
-            it.transcriptEndsSentence = endsSentence
-            it.quickEndFrames = commandFrames
-        }
+    override fun setCommandPause(frames: Int) {
+        vad?.quickEndFrames = frames
     }
 
     override fun start() {
@@ -42,7 +39,7 @@ class MicStream(private val listener: Listener, private val options: VoiceOption
         thread = Thread({ loop() }, "yboard-mic").apply { start() }
     }
 
-    /** Stops recording. A phrase still being spoken is ended, so its words aren't lost. */
+    /** Stops recording and commits any remaining speech. */
     override fun stop() {
         running = false
     }
@@ -70,11 +67,7 @@ class MicStream(private val listener: Listener, private val options: VoiceOption
             listener.onMicStopped()
             return
         }
-        val vad = Vad(
-            endFrames = options.endFrames,
-            idleFrames = options.idleFrames,
-            continuationEndFrames = options.continuationEndFrames,
-        ).also { this.vad = it }
+        val vad = Vad(idleFrames = options.idleFrames).also { this.vad = it }
         val frame = rate / 50                       // 20 ms
         val raw = ShortArray(frame * factor)
         val out = ShortArray(frame)
@@ -104,7 +97,7 @@ class MicStream(private val listener: Listener, private val options: VoiceOption
                     vad.process(raw.copyOf(), sink)
                 }
             }
-            if (vad.inSpeech) listener.onPhraseEnd()
+            vad.finish(sink)
         } catch (e: Exception) {
             listener.onMicError("The microphone stopped working.")
         } finally {

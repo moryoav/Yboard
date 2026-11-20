@@ -8,7 +8,7 @@ interface VoiceRecorder {
     val speaking: Boolean
     fun start()
     fun stop()
-    fun setPauseHint(commandFrames: Int, endsSentence: Boolean)
+    fun setCommandPause(frames: Int)
 }
 
 interface VoiceConnection {

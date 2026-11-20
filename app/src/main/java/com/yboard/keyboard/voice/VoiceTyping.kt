@@ -10,7 +10,7 @@ import java.io.ByteArrayOutputStream
  *
  * Words show up in the text field as you say them (underlined, like Gboard). Words that sound
  * like a command ("delete that", "question mark", "תמחק את זה") are NOT shown in the field; they
- * appear in the bar above the keys instead, and are carried out when you pause:
+ * appear in the bar above the keys instead. Once a command is recognized, a pause can carry it out:
  * simple commands right away on the phone, anything trickier by the AI.
  * Phrases are always applied in the order they were spoken.
  *
@@ -230,7 +230,7 @@ class VoiceTyping(
         val p = phrases.values.firstOrNull { it.audio == null && !it.done } ?: newPhrase()
         p.audio = audio
         commitPhrases[id] = p
-        if (phraseMode) transcribeRecording(p) else {
+        if (phraseMode) pump() else {
             val version = ++p.watchdog
             main.postDelayed({
                 if (isActive && !p.done && !p.transcribing && version == p.watchdog) {
@@ -270,10 +270,16 @@ class VoiceTyping(
         if (firstWordsLogged.add(itemId)) Log.i(TAG, "first words arrived (still talking: ${mic.speaking})")
         p.text.append(delta)
         // A delta from a turn we already committed must not affect the next mic phrase.
-        if (!p.done && p.audio == null && p === phrases.values.lastOrNull()) {
+        if (smartCommands && !p.done && p.audio == null && p === phrases.values.lastOrNull()) {
             val shown = p.shown
-            val commandFrames = if (smartCommands) LocalCommands.quickEndFrames(shown) else 0
-            mic.setPauseHint(commandFrames, VoiceEdits.endsSentence(shown))
+            val command = LocalCommands.trailingEdit(shown)?.second ?: shown
+            val quick = LocalCommands.quickEndFrames(command)
+            val frames = when {
+                quick > 0 -> quick
+                LocalCommands.trailingSend(shown) != null || VoiceEdits.looksLikeCommand(command) -> options.commandPauseFrames
+                else -> 0
+            }
+            mic.setCommandPause(frames)
         }
         showComposing()
     }
@@ -384,9 +390,7 @@ class VoiceTyping(
         live = null
         connected = true
         host.showMessage(message)
-        phrases.values.toList().filter { !it.done && it.audio != null && !it.transcribing }.forEach { transcribeRecording(it) }
-        ui()
-        if (stopping) finishIfIdle()
+        pump()
     }
 
     private fun phraseFor(id: String): Phrase? {
@@ -432,7 +436,11 @@ class VoiceTyping(
         if (!isActive) return
         while (thinking == null && sending == null) {
             val head = phrases.values.firstOrNull() ?: break
-            if (!head.done) break
+            if (!head.done) {
+                // The next recording gets the words just committed by the previous one as context.
+                if (phraseMode && head.audio != null) transcribeRecording(head)
+                break
+            }
             phrases.remove(head.id)
             head.remoteId?.let { finishedIds.add(it) }
             commitPhrases.entries.removeAll { it.value === head }
@@ -447,7 +455,7 @@ class VoiceTyping(
     private fun lastTyped(before: String): String? {
         while (typed.isNotEmpty()) {
             val p = typed.last()
-            if (p.isNotBlank() && before.endsWith(p)) return p
+            if (p.isNotBlank() && before.endsWith(p)) return LocalCommands.latestDictatedSentence(p)
             typed.removeAt(typed.size - 1)  // already removed by another command
         }
         return null
@@ -461,14 +469,21 @@ class VoiceTyping(
             insertDictation(spoken)
             return
         }
+        LocalCommands.trailingEdit(spoken)?.let { (words, command) ->
+            insertDictation(LocalCommands.spokenPunctuation(words))
+            handlePhrase(command)
+            return
+        }
         // 1) Simple commands, instantly and without the internet.
         LocalCommands.match(spoken, before, lastTyped(before))?.let { m ->
             Log.i(TAG, "phrase $n: command ${m.kind}")
             if (m.kind == LocalCommands.Kind.DELETE_ALL) { deleteEverything(); return }
             if (m.kind == LocalCommands.Kind.SEND) { send(); return }
             if (m.kind == LocalCommands.Kind.UNDO && deletedAll != null) { bringBackEverything(); return }
-            if (m.kind == LocalCommands.Kind.DELETE_PHRASE && typed.isNotEmpty() && m.edit.remove == typed.last()) {
-                typed.removeAt(typed.size - 1)
+            if (m.kind == LocalCommands.Kind.CANCEL_PHRASE) {
+                val kept = spoken.dropLast(LocalCommands.latestDictatedSentence(spoken).length)
+                if (kept.isNotBlank()) insertDictation(LocalCommands.spokenPunctuation(kept))
+                return
             }
             apply(m.edit, remember = false)
             return
@@ -507,9 +522,6 @@ class VoiceTyping(
                     insertDictation(dictated)
                 } else {
                     Log.i(TAG, "phrase $n: AI edit remove=${edit.remove.length} insert=${edit.insert.length}")
-                    if (edit.remove.isNotEmpty() && typed.isNotEmpty() && edit.remove.endsWith(typed.last())) {
-                        typed.removeAt(typed.size - 1)
-                    }
                     if (edit.remove.isEmpty() && edit.insert == spoken) insertDictation(dictated)
                     else apply(edit, remember = edit.insert.isNotBlank())
                 }
@@ -700,12 +712,18 @@ class VoiceTyping(
             composing = ""
         }
         if (n > 0) {
+            typed.lastOrNull()?.takeIf { before.endsWith(it) }?.let { latest ->
+                typed.removeAt(typed.lastIndex)
+                val kept = latest.dropLast(minOf(n, latest.length))
+                if (kept.isNotBlank()) typed.add(kept)
+            }
             if (cursor >= 0) cursor = (cursor - n).coerceAtLeast(0)
             expectCursor(cursor)
             ic.deleteSurroundingText(n, 0)
             text.setLength(text.length - n)
         }
-        val insert = VoiceEdits.forInsert(text.toString(), edit.insert)
+        val prefix = text.toString()
+        val insert = VoiceEdits.forInsert(prefix, edit.insert)
         if (insert.isNotEmpty()) {
             if (cursor >= 0) cursor += insert.length
             expectCursor(cursor)
@@ -714,8 +732,8 @@ class VoiceTyping(
             if (text.length > MAX_TEXT * 2) text.delete(0, text.length - MAX_TEXT)
         }
         if (remember && insert.isNotBlank()) {
-            host.onDictated(text.substring(0, text.length - insert.length), insert)
-            typed.add(insert)
+            host.onDictated(prefix, insert)
+            typed.add(insert.takeLast(MAX_TEXT))
             while (typed.size > 30) typed.removeAt(0)
         }
         ic.endBatchEdit()
@@ -750,9 +768,13 @@ class VoiceTyping(
     /** A command being said or worked on, to show in the bar ("“delete that”"). */
     private fun heardCommand(): String? {
         thinking?.let { return it }
-        return phrases.values.lastOrNull { p ->
-            p.shown.isNotEmpty() && LocalCommands.preview(p.shown, smartCommands) == null
-        }?.shown
+        if (!smartCommands) return null
+        val shown = phrases.values.lastOrNull()?.shown ?: return null
+        return LocalCommands.trailingEdit(shown)?.second ?: when {
+            LocalCommands.trailingSend(shown) != null -> "send"
+            LocalCommands.preview(shown, smart = true) == null -> shown
+            else -> null
+        }
     }
 
     private fun finishIfIdle() {
