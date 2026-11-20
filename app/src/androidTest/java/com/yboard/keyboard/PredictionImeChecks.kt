@@ -25,6 +25,7 @@ internal class PredictionImeChecks(private val instrumentation: Instrumentation)
     @Suppress("UNCHECKED_CAST") private fun slots() = field("slotWords").get(ime) as List<String>
     private fun pendingSwipes() = (field("pendingSwipes").get(ime) as Collection<*>).size
     private fun text() = ime.currentInputConnection?.getTextBeforeCursor(SentenceContext.READ_LIMIT, 0)?.toString().orEmpty()
+    private fun draft() = text() + ime.currentInputConnection.getTextAfterCursor(SentenceContext.READ_LIMIT, 0)?.toString().orEmpty()
     private fun touchGlide(word: String) {
         val keyboard = (field("root").get(ime) as KeyboardRootView).keyboard
         val method = KeyboardView::class.java.getDeclaredMethod("keyCenters").apply { isAccessible = true }
@@ -186,9 +187,68 @@ internal class PredictionImeChecks(private val instrumentation: Instrumentation)
                 check(current.isNotEmpty() && !current.startsWith("com.yboard.keyboard/")) { "No replacement password keyboard was active" }
             }
             report.put("passwordKeyboard", if (ownPassword) "Yboard guarded" else "OnePlus protected keyboard")
+            checkWordReplacement()
             launch("Finished ")
             report.put("passed", "prefix completion, consecutive taps, punctuation after suggestions, literal spaces at a moved cursor, full sentence, Qwen-ranked swipes, ordered glide queue, cursor and tap cancellation, private/password guards")
             return report.toString()
         } finally { onMain { Prefs.update { saved } } }
+    }
+
+    private fun checkWordReplacement() {
+        launch("I will be ")
+        onMain { touchGlide("there") }
+        await("glide with alternatives", timeoutMs = 45_000) {
+            text() == "I will be there" && field("stripCursor").getInt(ime) == text().length && slots().any { it.isNotBlank() && it != "there" }
+        }
+        onMain {
+            ime.onKey(KeyDef(KeyType.SPACE, " "))
+            ime.onText("tomorrow.")
+        }
+        await("more words after the glide") { draft() == "I will be there tomorrow." }
+        onMain { ime.currentInputConnection.setSelection(12, 12) }
+        await("original glide alternatives reopened") {
+            field("replacement").get(ime) != null && slots().any { it.isNotBlank() } && !slots().contains("there")
+        }
+        onMain {
+            val alternative = slots().first { it.isNotBlank() }
+            ime.onSuggestion(slots().indexOf(alternative))
+            check(draft() == "I will be $alternative tomorrow.")
+        }
+
+        onMain { Prefs.update { it.copy(suggestions = false, nextWords = false) } }
+        val english = "First sentence. I saw teh, yesterday."
+        launch(english)
+        val caret = english.indexOf("teh") + 1
+        onMain { ime.currentInputConnection.setSelection(caret, caret) }
+        await("replacement with typing suggestions off") { slots().contains("the") }
+        onMain {
+            val choice = slots().indexOf("the")
+            // Change text on the right of the caret before accepting the old suggestion.
+            ime.currentInputConnection.deleteSurroundingText(0, 1)
+            ime.onSuggestion(choice)
+            check(draft() == english.replace("teh", "th"))
+        }
+
+        launch(english)
+        onMain { ime.currentInputConnection.setSelection(caret, caret) }
+        await("spelling replacement reopened") { slots().contains("the") }
+        onMain { ime.onSuggestion(slots().indexOf("the")) }
+        await("replacement preserved punctuation and remaining draft") { draft() == english.replace("teh", "the") }
+
+        val hebrew = "אמרתי אניב, והמשכתי."
+        launch(hebrew)
+        val hebrewCaret = hebrew.indexOf("אניב") + 2
+        onMain { ime.currentInputConnection.setSelection(hebrewCaret, hebrewCaret) }
+        await("Hebrew word replacement") { slots().any { it.isNotBlank() } }
+        onMain {
+            val alternative = slots().first { it.isNotBlank() }
+            ime.onSuggestion(slots().indexOf(alternative))
+            check(draft() == hebrew.replace("אניב", alternative))
+        }
+        launch("Private word", options = 0x1000000)
+        onMain { ime.currentInputConnection.setSelection(3, 3) }
+        await("private word cursor move") { text() == "Pri" }
+        onMain { check(slots().isEmpty() && field("replacement").get(ime) == null) }
+        onMain { Prefs.update { it.copy(suggestions = true, nextWords = true) } }
     }
 }

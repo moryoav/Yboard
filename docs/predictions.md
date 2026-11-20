@@ -7,7 +7,7 @@ no-backup storage across app updates, and the selection survives app restarts.
 Only the selected model runs in memory. Both are quantized to Q4_K_M, verified
 by size and SHA-256, and run through the pinned llama.cpp runtime on the device.
 
-All word suggestions come from Qwen. The old dictionary, phrase corpus, learned
+While typing, word suggestions come from Qwen. The old dictionary, phrase corpus, learned
 pair ranking, cloud prediction requests and emoji suggestion fallback are disconnected
 from the word strip. Explicit text shortcuts and email helper buttons remain available.
 Old learned vocabulary can still supply names to the gesture lexicon; it does not
@@ -34,9 +34,15 @@ sentence in a shared-context batch. The final score combines that model probabil
 with path distance. Geometry still rejects impossible paths; Qwen resolves linguistic
 ambiguities. A gesture starts preparing the context before the finger lifts.
 
+Tapping inside an earlier word in an editable draft opens replacement suggestions
+automatically. Yboard can reuse recent glide alternatives from the current editing
+session. For other words, it offers nearby spellings from its English or Hebrew
+dictionary and ranks them with the selected model when available. Accepting a
+replacement edits only the target word and preserves surrounding text.
+
 Password, private-learning, number, phone and incompatible editor fields do not feed
 prediction inference. Context is cleared when the input session ends. A missing model
-or inference error shows a status, with no dictionary or cloud fallback. Keyboard text
+or inference error shows a status for typing predictions and glide ranking. Keyboard text
 and predictions are not logged or persisted by the model engine.
 
 ## Model provenance and reproduction

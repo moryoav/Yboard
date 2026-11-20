@@ -55,6 +55,13 @@ class ToolbarView(context: Context) : View(context) {
     val suggestionTouchActive: Boolean get() = pressedSlot >= 0
     private var longPressed = false
 
+    fun cancelSuggestionPress() {
+        if (pressedSlot < 0) return
+        handler.removeCallbacks(longPressRunnable)
+        pressedSlot = -1
+        invalidate()
+    }
+
     private var suggestions: List<String> = emptyList()
     private var primary = -1
 

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.11.0
+
+- Reopened replacement suggestions when you tap inside an earlier word in editable text. Picking a replacement keeps the surrounding spaces and punctuation.
+- Restored recent glide alternatives when available and offered local spelling alternatives for other words.
+
 ## 1.10.0
 
 - Added Qwen3.5-0.8B-Base as an optional on-device model for word suggestions and swipe typing.

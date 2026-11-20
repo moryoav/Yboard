@@ -62,6 +62,7 @@ import com.yboard.keyboard.text.Pt
 import com.yboard.keyboard.text.Suggester
 import com.yboard.keyboard.text.SwipeDecoder
 import com.yboard.keyboard.text.UserWords
+import com.yboard.keyboard.text.WordReplacement
 import com.yboard.keyboard.text.WordFreq
 import com.yboard.keyboard.ui.MainActivity
 import com.yboard.keyboard.voice.ApiKeyStore
@@ -129,6 +130,8 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     private var lastAutoCorrect: AutoCorrection? = null
 
     private class SwipeCommit(val word: String, val alternatives: List<String>, val before: String)
+    private data class RecentSwipe(val word: String, val before: String, val offset: Int?, val alternatives: List<String>)
+    private val recentSwipes = ArrayDeque<RecentSwipe>()
     private var lastSwipe: SwipeCommit? = null
     private val pendingSwipes = ArrayDeque<List<SwipeDecoder.Candidate>>()
     private val swipePending get() = pendingSwipes.isNotEmpty()
@@ -350,6 +353,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         predictionFieldActive = true
         lastAutoCorrect = null
         lastSwipe = null
+        clearReplacementSession()
         rejected.clear()
         root?.keyboard?.enterType = enterTypeFor(info)
         ensureDictionary(settings.activeLanguage)
@@ -362,6 +366,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     override fun onFinishInputView(finishingInput: Boolean) {
         suggestionSpace = null
         predictionFieldActive = false
+        clearReplacementSession()
         LocalQwen.clearContext()
         closeSticker()
         endVoice()
@@ -377,6 +382,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     override fun onFinishInput() {
         suggestionSpace = null
         predictionFieldActive = false
+        clearReplacementSession()
         LocalQwen.clearContext()
         closeSticker()
         endVoice()
@@ -433,6 +439,9 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
         selStart = newSelStart
         selEnd = newSelEnd
+        if (oldSelEnd != newSelEnd) {
+            revisitWordEnd = if (newSelStart == newSelEnd && newSelEnd < oldSelEnd) newSelEnd else -1
+        }
         suggestionSpace?.let {
             if (newSelStart != it.cursor || newSelEnd != it.cursor) suggestionSpace = null
         }
@@ -476,8 +485,10 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
                 if (lang == settings.activeLanguage) {
                     engineLanguage = ""
                     rebuildEngine()
-                    updateSuggestions()
                 }
+                val replacingThisLanguage = replacement?.language == lang
+                if (replacingThisLanguage) replacement = null
+                if (lang == settings.activeLanguage || replacingThisLanguage) updateSuggestions()
             }
         }
     }
@@ -534,6 +545,8 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     }
 
     private fun showStrip(words: List<String>, primary: Int, display: List<String> = words) {
+        if (replacement != null) root?.toolbar?.cancelSuggestionPress()
+        replacement = null
         stripBefore = suggestionText ?: currentInputConnection?.getTextBeforeCursor(SentenceContext.READ_LIMIT, 0)?.toString()
         stripCursor = selEnd
         modelNote = false
@@ -556,6 +569,8 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     private var stripBefore: String? = null
     private var stripCursor = -1
     private var suggestionText: String? = null
+    private var replacement: Replacement? = null
+    private var revisitWordEnd = -1
     private var modelNote = false
     private var modelNoteAction = false
     private var predictionModel = QwenModel.selected
@@ -682,6 +697,8 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     }
 
     private fun clearStrip() {
+        if (replacement != null) root?.toolbar?.cancelSuggestionPress()
+        replacement = null
         modelNote = false
         slotWords = emptyList()
         emojiSlot = -1
@@ -720,7 +737,10 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     private fun updateSuggestionsNow() {
         if (voice?.isActive == true || sprinkleNote()) { cancelAiPredictions(); return }
         if (emailLayout() && emojiSearchBar == null && selStart == selEnd) { cancelAiPredictions(); showEmailChips(); return }
-        if (!settings.suggestions || !localAllowed()) { cancelAiPredictions(); clearStrip(); return }
+        if (!localAllowed()) { cancelAiPredictions(); clearStrip(); return }
+        val insideWord = cursorInsideWord()
+        if ((insideWord || revisitWordEnd == selEnd && selEnd >= 0) && showWordReplacement()) return
+        if (!settings.suggestions) { cancelAiPredictions(); clearStrip(); return }
         if (swipeWordBeforeCursor()) {
             val swipe = lastSwipe!!
             val alternatives = swipe.alternatives.filter { it != swipe.word }
@@ -729,7 +749,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
             return
         }
         lastSwipe = null
-        if (cursorInsideWord()) { cancelAiPredictions(); clearStrip(); return }
+        if (insideWord) { cancelAiPredictions(); clearStrip(); return }
         val input = localInput() ?: run { cancelAiPredictions(); showModelNote("Sentence too long"); return }
         if (input.context.isBlank() && input.prefix.isEmpty()) { cancelAiPredictions(); clearStrip(); return }
         if (input.prefix.isEmpty() && !settings.nextWords) { cancelAiPredictions(); clearStrip(); return }
@@ -833,6 +853,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     // ------------------------------------------------------- key handling
 
     override fun onKey(key: KeyDef) {
+        dismissWordReplacement()
         stripBefore = null
         if (swipePending) cancelAiPredictions()
         endVoice()
@@ -852,6 +873,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     }
 
     override fun onText(text: String) {
+        dismissWordReplacement()
         endVoice()
         cancelAiPredictions()
         if (emojiSearchBar != null) { emojiQuery += text.lowercase(); refreshEmojiSearch(); return }
@@ -1017,6 +1039,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     // --------------------------------------------------------- swipe typing
 
     override fun onSwipeStart() {
+        dismissWordReplacement()
         if (swipePending || !localAllowed() || !QwenModel.selectedState.ready) return
         val input = localInput() ?: return
         LocalQwen.prepare(input.context + input.prefix)
@@ -1042,9 +1065,9 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
 
     private data class EditorTarget(val before: String, val after: String?, val cursor: Int?)
 
-    private fun editorTarget(connection: InputConnection, limit: Int = SentenceContext.READ_LIMIT): EditorTarget? {
+    private fun editorTarget(connection: InputConnection, limit: Int = SentenceContext.READ_LIMIT, afterLimit: Int = 32): EditorTarget? {
         if (Build.VERSION.SDK_INT >= 31) {
-            connection.getSurroundingText(limit, 32, 0)?.let { text ->
+            connection.getSurroundingText(limit, afterLimit, 0)?.let { text ->
                 if (text.selectionStart != text.selectionEnd) return null
                 return EditorTarget(
                     text.text.subSequence(0, text.selectionStart).toString(),
@@ -1055,7 +1078,112 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         }
         if (!connection.getSelectedText(0).isNullOrEmpty()) return null
         val before = connection.getTextBeforeCursor(limit, 0)?.toString() ?: return null
-        return EditorTarget(before, connection.getTextAfterCursor(32, 0)?.toString(), null)
+        return EditorTarget(before, connection.getTextAfterCursor(afterLimit, 0)?.toString(), null)
+    }
+
+    private data class Replacement(
+        val connection: InputConnection,
+        val editor: EditorTarget,
+        val cursor: Int,
+        val span: WordReplacement.Span,
+        val language: String,
+    ) {
+        val start get() = cursor - span.left
+        val end get() = cursor + span.right
+    }
+
+    private fun clearReplacementSession() {
+        recentSwipes.clear()
+        if (replacement != null) root?.toolbar?.cancelSuggestionPress()
+        replacement = null
+        revisitWordEnd = -1
+    }
+
+    private fun dismissWordReplacement() {
+        revisitWordEnd = -1
+        if (replacement == null) return
+        cancelAiPredictions()
+        clearStrip()
+    }
+
+    private fun showWordReplacement(): Boolean {
+        val connection = currentInputConnection ?: return false
+        val editor = editorTarget(connection, afterLimit = 64) ?: return false
+        val after = editor.after ?: return false
+        val cursor = editor.cursor ?: selEnd
+        if (cursor < 0 || cursor != selEnd) return false
+        val span = WordReplacement.atCursor(editor.before, after, revisitWordEnd == cursor && after.isNotEmpty())
+            ?: return false
+        val target = Replacement(connection, editor, cursor, span, MyWords.languageOf(span.word))
+        if (target.start < 0) return false
+        if (replacement == target) return true
+
+        root?.toolbar?.cancelSuggestionPress()
+        cancelAiPredictions()
+        lastSwipe = null
+        val beforeWord = editor.before.dropLast(span.left)
+        val beforeTail = beforeWord.takeLast(24)
+        val recent = recentSwipes.lastOrNull {
+            it.word == span.word && it.before == beforeTail && (it.offset == null || it.offset == target.start)
+        }
+        val originals = recent?.alternatives.orEmpty().filterNot { it == span.word }
+        if (originals.isNotEmpty()) {
+            showReplacementOptions(target, originals)
+            return true
+        }
+
+        ensureDictionary(target.language)
+        val user = if (settings.learnWords) UserWords.get(this, target.language) else UserWords.inMemory(target.language)
+        val options = Suggester(dictionaries[target.language], user, target.language).suggest(span.word, 12).suggestions
+        showReplacementOptions(target, options)
+        if (options.size > 1 && QwenModel.selectedState.ready) {
+            val leftContext = SentenceContext.capture(beforeWord, target.start).let { it.context + it.prefix }
+            val nextWord = after.drop(span.right).trimStart(' ', '\t').takeWhile(PredictionContext::isWordChar)
+            val phrases = if (nextWord.isEmpty()) options else options.map { "$it $nextWord" }
+            LocalQwen.rank(leftContext, phrases) { result ->
+                val scores = result.getOrNull() ?: return@rank
+                if (replacement != target || !replacementStillCurrent(target) ||
+                    root?.toolbar?.suggestionTouchActive == true || scores.size != options.size) return@rank
+                showReplacementOptions(target, options.indices.sortedByDescending { scores[it] }.map { options[it] })
+            }
+        }
+        return true
+    }
+
+    private fun showReplacementOptions(target: Replacement, options: List<String>) {
+        currentWord = ""
+        val best = options.firstOrNull()
+        if (best == null) clearStrip()
+        else showStrip(listOf(options.getOrElse(1) { "" }, best, options.getOrElse(2) { "" }), 1)
+        replacement = target
+    }
+
+    private fun replacementStillCurrent(target: Replacement): Boolean =
+        localAllowed() && selEnd == target.cursor && currentInputConnection === target.connection &&
+            editorTarget(target.connection, afterLimit = 64) == target.editor
+
+    private fun replaceWord(target: Replacement, word: String) {
+        dismissWordReplacement()
+        if (!replacementStillCurrent(target)) {
+            updateSuggestions()
+            return
+        }
+        suggestionSpace = null
+        lastAutoCorrect = null
+        val connection = target.connection
+        if (Build.VERSION.SDK_INT >= 34 && target.editor.cursor != null &&
+            connection.replaceText(target.start, target.end, word, 1, null)) return
+
+        connection.beginBatchEdit()
+        try {
+            if (connection.setSelection(target.start, target.end)) {
+                if (connection.getSelectedText(0)?.toString() != target.span.word || !connection.commitText(word, 1)) {
+                    connection.setSelection(target.cursor, target.cursor)
+                }
+            }
+        } finally {
+            connection.endBatchEdit()
+        }
     }
 
     private fun recognizeNextSwipe() {
@@ -1111,6 +1239,10 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
             }
             if (shift == ShiftState.ON) setShift(ShiftState.OFF)
             lastSwipe = SwipeCommit(word, alternatives, before)
+            val space = if (needSpace) " " else ""
+            if (recentSwipes.size == 32) recentSwipes.removeFirst()
+            recentSwipes.addLast(RecentSwipe(word, (before + space).takeLast(24),
+                target.cursor?.plus(space.length), alternatives))
             lastSpaceTime = 0
             currentWord = ""
             if (swipePending) {
@@ -1168,6 +1300,10 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
             return
         }
         val word = slotWords.getOrNull(index)?.takeIf { it.isNotEmpty() } ?: return
+        replacement?.let { target ->
+            replaceWord(target, word)
+            return
+        }
         val ic = currentInputConnection ?: return
         if (stripBefore == null || selStart != selEnd || stripCursor != selEnd ||
             ic.getTextBeforeCursor(SentenceContext.READ_LIMIT, 0)?.toString() != stripBefore) {
@@ -1246,6 +1382,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     }
 
     override fun onSuggestionLongPress(index: Int) {
+        if (replacement != null) return
         if (sprinkle != null) return
         val word = slotWords.getOrNull(index)?.takeIf { it.isNotEmpty() } ?: return
         val norm = Dictionary.normalize(word)

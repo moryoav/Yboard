@@ -88,7 +88,7 @@ fun TypingScreen(settings: YboardSettings, onBack: () -> Unit, onShortcuts: () -
                 "Next-word predictions", "After a space, suggest the word you'll probably type next",
                 settings.nextWords, enabled = settings.suggestions,
             ) { b -> Prefs.update { it.copy(nextWords = b) } }
-            HintText("Only Qwen predictions appear in the word strip. Dictionary autocorrect and the old phrase and emoji suggestions are no longer used. Text shortcuts still expand when you press space.")
+            HintText("Tap inside an earlier word to see replacements. Text shortcuts expand when you press space.")
             SwitchRow(
                 "Emoji sprinkle button",
                 if (hasKey) "A ✨ button above the keys adds fitting emojis to your message. Uses your OpenAI key"
