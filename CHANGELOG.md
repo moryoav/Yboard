@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.12.2
+
+- Added automatic spacing when typing letters after a glided word. Punctuation stays attached to the preceding word.
+- Capitalized the standalone English pronoun “I” at word boundaries.
+
 ## 1.12.1
 
 - Added a Remove action for downloaded local models. Removing the active model switches to another installed model when one is available.

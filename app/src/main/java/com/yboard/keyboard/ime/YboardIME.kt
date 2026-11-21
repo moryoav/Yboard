@@ -129,7 +129,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     private class AutoCorrection(val original: String, val fixed: String, val separator: String)
     private var lastAutoCorrect: AutoCorrection? = null
 
-    private class SwipeCommit(val word: String, val alternatives: List<String>, val before: String)
+    private class SwipeCommit(val word: String, val alternatives: List<String>, val before: String, val cursor: Int?)
     private data class RecentSwipe(val word: String, val before: String, val offset: Int?, val alternatives: List<String>)
     private val recentSwipes = ArrayDeque<RecentSwipe>()
     private var lastSwipe: SwipeCommit? = null
@@ -539,9 +539,10 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
 
     private fun swipeWordBeforeCursor(): Boolean {
         val ls = lastSwipe ?: return false
-        if (selStart != selEnd) return false
-        val before = suggestionText?.takeLast(ls.word.length) ?: currentInputConnection?.getTextBeforeCursor(ls.word.length, 0) ?: return false
-        return before.toString() == ls.word
+        suggestionText?.let { return (ls.cursor == null || ls.cursor == selEnd) && it.endsWith(ls.word) }
+        val connection = currentInputConnection ?: return false
+        val target = editorTarget(connection, ls.word.length, afterLimit = 0) ?: return false
+        return (ls.cursor == null || ls.cursor == (target.cursor ?: selEnd)) && target.before == ls.word
     }
 
     private fun showStrip(words: List<String>, primary: Int, display: List<String> = words) {
@@ -792,6 +793,10 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         acceptSwipe()
         if (wasSwipe) return false
         val typed = wordBeforeCursor()
+        if (typed == "i" && capitalizeTypedPronoun(separator)) {
+            learn("I")
+            return true
+        }
         val before = if (typed.isNotEmpty() && suggestionsAllowed) contextBefore(typed) else ""
         if (applyAutoCorrect(separator)) {
             lastAutoCorrect?.let { learnAccepted(it.fixed, before) }
@@ -881,25 +886,27 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         endVoice()
         cancelAiPredictions()
         if (emojiSearchBar != null) { emojiQuery += text.lowercase(); refreshEmojiSearch(); return }
+        commitTextKey(text)
+    }
+
+    private fun commitTextKey(text: String) {
         lastAutoCorrect = null
-        lastSwipe = null
         val ic = currentInputConnection ?: return
+        val prependSpace = text.firstOrNull()?.isLetterOrDigit() == true && swipeWordBeforeCursor()
         val replacedSpace = replaceSuggestionSpace(ic, text)
-        if (!replacedSpace) ic.commitText(text, 1)
+        if (!replacedSpace) {
+            val finished = if (text in PUNCTUATION) finishWord(text) else {
+                acceptSwipe()
+                text.firstOrNull()?.let { !isWordElement(it) } == true && capitalizeTypedPronoun(text)
+            }
+            if (!finished) ic.commitText(if (prependSpace) " $text" else text, 1)
+        }
         finishTextKey(replacedSpace)
     }
 
     private fun commitChar(s: String) {
-        val ic = currentInputConnection ?: return
         val upper = mode == Mode.LETTERS && layoutLanguage() == "en" && shift != ShiftState.OFF && s.length == 1
-        val text = if (upper) s.uppercase() else s
-        val isWordPart = text.length == 1 && isWordChar(text[0])
-        if (isWordPart && swipeWordBeforeCursor()) lastSwipe = null
-        val replacedSpace = replaceSuggestionSpace(ic, text)
-        if (!replacedSpace && !(text in PUNCTUATION && finishWord(text))) {
-            ic.commitText(text, 1)
-        }
-        finishTextKey(replacedSpace)
+        commitTextKey(if (upper) s.uppercase() else s)
     }
 
     private fun finishTextKey(replacedSpace: Boolean) {
@@ -1085,6 +1092,36 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         return EditorTarget(before, connection.getTextAfterCursor(afterLimit, 0)?.toString(), null)
     }
 
+    private fun isWordElement(char: Char): Boolean = isWordChar(char) || char.isDigit()
+
+    private fun isStandalonePronoun(target: EditorTarget): Boolean =
+        suggestionsAllowed && layoutLanguage() == "en" && target.before.endsWith('i') &&
+            target.before.getOrNull(target.before.length - 2)?.let(::isWordElement) != true &&
+            target.after?.firstOrNull()?.let(::isWordElement) != true
+
+    private fun capitalizeTypedPronoun(separator: String): Boolean {
+        if (!suggestionsAllowed || layoutLanguage() != "en") return false
+        val connection = currentInputConnection ?: return false
+        if (connection.getTextBeforeCursor(1, 0)?.toString() != "i") return false
+        val target = editorTarget(connection, limit = 2, afterLimit = 1) ?: return false
+        return isStandalonePronoun(target) && commitCapitalizedPronoun(connection, target, separator)
+    }
+
+    private fun commitCapitalizedPronoun(connection: InputConnection, target: EditorTarget, suffix: String): Boolean {
+        val cursor = target.cursor
+        if (Build.VERSION.SDK_INT >= 34 && cursor != null && cursor > 0 &&
+            connection.replaceText(cursor - 1, cursor, "I$suffix", 1, null)) return true
+        connection.beginBatchEdit()
+        try {
+            return connection.deleteSurroundingText(1, 0) && connection.commitText("I$suffix", 1)
+        } finally {
+            connection.endBatchEdit()
+        }
+    }
+
+    private fun capitalizePronoun(word: String): String =
+        if (word == "i" && suggestionsAllowed && layoutLanguage() == "en") "I" else word
+
     private data class Replacement(
         val connection: InputConnection,
         val editor: EditorTarget,
@@ -1199,7 +1236,8 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
             updateSuggestions()
             return
         }
-        val before = target.before
+        val capitalizeBefore = isStandalonePronoun(target)
+        val before = if (capitalizeBefore) target.before.dropLast(1) + "I" else target.before
         val cursor = target.cursor ?: selEnd
         val input = SentenceContext.capture(before, cursor)
         if (before.length >= SentenceContext.READ_LIMIT && cursor > before.length &&
@@ -1228,22 +1266,24 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
             fun cased(word: String) = when (casing) {
                 ShiftState.LOCKED -> word.uppercase()
                 ShiftState.ON -> word.replaceFirstChar { it.uppercaseChar() }
-                ShiftState.OFF -> word
+                ShiftState.OFF -> capitalizePronoun(word)
             }
             val alternatives = ranked.map(::cased).distinct()
             val word = alternatives.first()
             acceptSwipe()
             lastAutoCorrect = null
-            val needSpace = before.isNotEmpty() && (before.last().isLetterOrDigit() || before.last() in ".,!?:;")
+            val space = if (before.lastOrNull()?.let { it.isLetterOrDigit() || it in ".,!?:;" } == true) " " else ""
             suggestionSpace = null
-            if (!connection.commitText(if (needSpace) " $word" else word, 1)) {
+            val insert = space + word
+            val committed = if (capitalizeBefore) commitCapitalizedPronoun(connection, target, insert)
+                else connection.commitText(insert, 1)
+            if (!committed) {
                 cancelAiPredictions()
                 updateSuggestions()
                 return@rank
             }
             if (shift == ShiftState.ON) setShift(ShiftState.OFF)
-            lastSwipe = SwipeCommit(word, alternatives, before)
-            val space = if (needSpace) " " else ""
+            lastSwipe = SwipeCommit(word, alternatives, before, target.cursor?.plus(insert.length))
             if (recentSwipes.size == 32) recentSwipes.removeFirst()
             recentSwipes.addLast(RecentSwipe(word, (before + space).takeLast(24),
                 target.cursor?.plus(space.length), alternatives))
@@ -1361,7 +1401,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     }
 
     private fun commitSpacedSuggestion(ic: InputConnection, word: String, replacedLength: Int = 0) {
-        val inserted = "$word "
+        val inserted = "${capitalizePronoun(word)} "
         val start = selEnd - replacedLength
         if (ic.commitText(inserted, 1) && start >= 0) {
             suggestionSpace = SuggestionSpace(start + inserted.length, inserted)

@@ -53,7 +53,7 @@ internal class PredictionImeChecks(private val instrumentation: Instrumentation)
     }
     private fun launch(value: String, inputType: Int = 131073, options: Int = 0): Boolean {
         val encoded = java.util.Base64.getEncoder().encodeToString(value.toByteArray(Charsets.UTF_8))
-        val command = "am start -W -n com.yboard.keyboard.probe/com.yboard.keyboard.test.EditorProbeActivity -f 0x10008000 --es text64 $encoded --ei inputType $inputType --ei imeOptions $options"
+        val command = "am start -W -n com.yboard.keyboard.probe/com.yboard.keyboard.test.EditorProbeActivity -f 0x10008000 --es text64 '$encoded' --ei inputType $inputType --ei imeOptions $options"
         instrumentation.uiAutomation.executeShellCommand(command).use { fd -> java.io.FileInputStream(fd.fileDescriptor).use { it.readBytes() } }
         SystemClock.sleep(1000)
         var found = false
@@ -169,6 +169,7 @@ internal class PredictionImeChecks(private val instrumentation: Instrumentation)
             }
             SystemClock.sleep(1000)
             onMain { check(text() == "A new message x") }
+            checkMixedTyping()
             launch("Private ", options = 0x1000000)
             onMain {
                 val allowed = YboardIME::class.java.getDeclaredMethod("localAllowed").apply { isAccessible = true }.invoke(ime) as Boolean
@@ -189,9 +190,50 @@ internal class PredictionImeChecks(private val instrumentation: Instrumentation)
             report.put("passwordKeyboard", if (ownPassword) "Yboard guarded" else "OnePlus protected keyboard")
             checkWordReplacement()
             launch("Finished ")
-            report.put("passed", "prefix completion, consecutive taps, punctuation after suggestions, literal spaces at a moved cursor, full sentence, Qwen-ranked swipes, ordered glide queue, cursor and tap cancellation, private/password guards")
+            report.put("passed", "prefix completion, consecutive taps, punctuation after suggestions, literal spaces at a moved cursor, full sentence, model-ranked swipes, ordered glide queue, cursor and tap cancellation, spacing after completed glides, standalone I, private/password guards")
             return report.toString()
         } finally { onMain { Prefs.update { saved } } }
+    }
+
+    private fun checkMixedTyping() {
+        launch("")
+        onMain {
+            ime.onKey(KeyDef(KeyType.SHIFT))
+            touchGlide("not")
+        }
+        await("glided Not") { draft() == "Not" }
+        onMain { touchGlide("a") } // A stationary touch on the a key.
+        await("automatic space before a") { draft() == "Not a" }
+        onMain { touchGlide("word") }
+        await("automatic space before word") { draft() == "Not a word" }
+        onMain { ime.onKey(KeyDef(KeyType.PERIOD, ".")) }
+        await("period attached to the completed glide") { draft() == "Not a word." }
+
+        launch("I will be ")
+        onMain { touchGlide("there") }
+        await("completed glide before taps") { text() == "I will be there" }
+        onMain {
+            touchGlide("i")
+            touchGlide("n")
+            ime.onKey(KeyDef(KeyType.COMMA, ","))
+        }
+        await("one space before a typed word, with no space before a comma") { draft() == "I will be there in," }
+
+        launch("Then i")
+        onMain { ime.onKey(KeyDef(KeyType.SPACE, " ")) }
+        await("standalone i before space") { draft() == "Then I " }
+
+        launch("Then i")
+        onMain { ime.onKey(KeyDef(KeyType.PERIOD, ".")) }
+        await("standalone i before punctuation") { draft() == "Then I." }
+
+        launch("Then i")
+        onMain { touchGlide("will") }
+        await("standalone i before a glide", timeoutMs = 45_000) { draft() == "Then I will" }
+
+        launch("2i")
+        onMain { ime.onKey(KeyDef(KeyType.PERIOD, ".")) }
+        await("i adjacent to a digit") { draft() == "2i." }
     }
 
     private fun checkWordReplacement() {
