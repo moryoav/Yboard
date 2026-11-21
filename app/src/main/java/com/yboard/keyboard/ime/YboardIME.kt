@@ -574,10 +574,14 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     private var modelNote = false
     private var modelNoteAction = false
     private var predictionModel = QwenModel.selected
+    private var predictionModelReady = QwenModel.selectedState.ready
     private val modelListener: () -> Unit = {
-        val selected = QwenModel.selected
-        if (predictionModel != selected) {
+        val catalog = QwenModel.state.value
+        val selected = catalog.selected
+        val ready = catalog[selected].ready
+        if (predictionModel != selected || predictionModelReady != ready) {
             predictionModel = selected
+            predictionModelReady = ready
             cancelAiPredictions()
             qwenInput = null
             qwenWords = emptyList()

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.12.1
+
+- Added a Remove action for downloaded local models. Removing the active model switches to another installed model when one is available.
+
 ## 1.12.0
 
 - Added Gemma 3 270M Base as a 241 MB downloadable model for local word suggestions and swipe typing.

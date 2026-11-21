@@ -50,7 +50,13 @@ object QwenModel {
             "$GEMMA_ORIGIN/$GEMMA_FILE", "verified-gemma270m"),
     }
 
-    data class State(val ready: Boolean = false, val downloading: Boolean = false, val bytes: Long = 0, val error: String? = null)
+    data class State(
+        val ready: Boolean = false,
+        val downloading: Boolean = false,
+        val removing: Boolean = false,
+        val bytes: Long = 0,
+        val error: String? = null,
+    )
     data class Catalog(val selected: Variant = Variant.QWEN3, val models: Map<Variant, State> = emptyMap()) {
         operator fun get(model: Variant): State = models[model] ?: State()
     }
@@ -58,7 +64,8 @@ object QwenModel {
     val state = mutable.asStateFlow()
     val selected get() = state.value.selected
     val selectedState get() = state.value.let { it[it.selected] }
-    private val worker = Executors.newSingleThreadExecutor()
+    // A download can run while another model's local files are being removed.
+    private val worker = Executors.newFixedThreadPool(2)
     private val main = Handler(Looper.getMainLooper())
     private val listeners = CopyOnWriteArraySet<() -> Unit>()
     private val http = OkHttpClient.Builder().connectTimeout(20, TimeUnit.SECONDS).readTimeout(45, TimeUnit.SECONDS).build()
@@ -75,21 +82,29 @@ object QwenModel {
         directory = File(context.applicationContext.noBackupFilesDir, "qwen").apply { mkdirs() }
         val prefs = context.applicationContext.getSharedPreferences("yboard_local_model", Context.MODE_PRIVATE)
         selection = prefs
-        val saved = prefs.getString("selected", null)
-        mutable.value = Catalog(
-            selected = Variant.entries.firstOrNull { it.name == saved && !requiresTerms(it) } ?: Variant.QWEN3,
-            models = Variant.entries.associateWith { model ->
-                val file = file(model)
-                val ready = file.length() == model.size && runCatching {
-                    File(directory, model.marker).readText() == verification(model)
-                }.getOrDefault(false)
-                State(ready = ready, bytes = part(model).length().coerceAtMost(model.size))
-            },
-        )
+        val savedName = prefs.getString("selected", null)
+        val saved = Variant.entries.firstOrNull { it.name == savedName && !requiresTerms(it) }
+        val catalog = Catalog(selected = saved ?: Variant.QWEN3, models = Variant.entries.associateWith(::readState))
+        // The process can stop after unlinking a selected download and before persisting its replacement.
+        val fallback = if (saved != null && !catalog[saved].ready) fallbackFor(saved, catalog) else null
+        mutable.value = if (fallback != null) catalog.copy(selected = fallback) else catalog
+        if (fallback != null) persistSelection(fallback)
     }
 
     fun file(model: Variant): File = File(checkNotNull(directory) { "Model store is not initialized" }, model.fileName)
     private fun part(model: Variant) = File(directory, "${model.fileName}.part")
+    private fun marker(model: Variant) = File(directory, model.marker)
+
+    private fun readState(model: Variant): State {
+        val ready = file(model).length() == model.size && runCatching {
+            marker(model).readText() == verification(model)
+        }.getOrDefault(false)
+        return State(ready = ready, bytes = part(model).length().coerceAtMost(model.size))
+    }
+
+    fun fallbackFor(model: Variant, catalog: Catalog = state.value): Variant? =
+        Variant.entries.firstOrNull { it != model && catalog[it].ready && !requiresTerms(it) }
+
     fun addListener(listener: () -> Unit) { listeners.add(listener) }
     fun removeListener(listener: () -> Unit) { listeners.remove(listener) }
     fun requiresTerms(model: Variant): Boolean =
@@ -102,22 +117,49 @@ object QwenModel {
     private fun publish(model: Variant, next: State) {
         val previous = mutable.value[model]
         mutable.update { it.copy(models = it.models + (model to next)) }
-        if (model == selected && (previous.ready != next.ready || previous.downloading != next.downloading)) {
+        if (model == selected && (previous.ready != next.ready || previous.downloading != next.downloading ||
+                previous.removing != next.removing)) {
             main.post { if (model == selected) listeners.forEach { it() } }
         }
+    }
+
+    private fun persistSelection(model: Variant) {
+        checkNotNull(selection).edit().putString("selected", model.name).apply()
     }
 
     @MainThread fun select(model: Variant) {
         if (model == selected || !state.value[model].ready || requiresTerms(model)) return
         mutable.update { it.copy(selected = model) }
-        checkNotNull(selection).edit().putString("selected", model.name).apply()
+        persistSelection(model)
         LocalQwen.release()
         listeners.forEach { it() }
     }
 
+    @MainThread @Synchronized fun remove(model: Variant) {
+        if (!state.value[model].ready) return
+        publish(model, State(removing = true))
+        if (model == selected) {
+            persistSelection(model)
+            LocalQwen.release()
+        }
+        worker.execute {
+            val removal = runCatching {
+                Files.deleteIfExists(part(model).toPath())
+                Files.deleteIfExists(file(model).toPath())
+                Files.deleteIfExists(marker(model).toPath())
+            }
+            val next = readState(model).copy(error = if (removal.isFailure) "Could not remove the model. Try again." else null)
+            main.post {
+                publish(model, next)
+                if (model == selected && !next.ready) fallbackFor(model)?.let(::select)
+            }
+        }
+    }
+
     @Synchronized fun download(context: Context, model: Variant) {
         init(context)
-        if (transfer != null || state.value[model].ready || requiresTerms(model)) return
+        val current = state.value[model]
+        if (transfer != null || current.ready || current.removing || requiresTerms(model)) return
         val job = Transfer(model)
         transfer = job
         publish(model, state.value[model].copy(downloading = true, error = null))
@@ -212,11 +254,12 @@ object QwenModel {
         return digest.digest().joinToString("") { "%02x".format(it.toInt() and 255) }
     }
     private fun verification(model: Variant) = "${model.sha256}:${model.size}:${file(model).lastModified()}"
-    private fun markVerified(model: Variant) { File(directory, model.marker).writeText(verification(model)) }
+    private fun markVerified(model: Variant) { marker(model).writeText(verification(model)) }
 
     /** Instrumentation imports the exact release model without exporting phone data. */
     @Synchronized internal fun importVerified(source: File, model: Variant) {
-        check(transfer == null && !state.value[model].ready) { "Model already available or download pending" }
+        val current = state.value[model]
+        check(transfer == null && !current.ready && !current.removing) { "Model already available or transfer pending" }
         check(source.length() == model.size) { "Wrong model size" }
         check(checksum(source) == model.sha256) { "Wrong model checksum" }
         source.copyTo(part(model), overwrite = true)

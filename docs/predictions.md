@@ -7,6 +7,11 @@ stay in private no-backup storage across app updates, and the selection survives
 app restarts. The selected model runs through the pinned llama.cpp runtime on
 the device. Every download is verified by size and SHA-256.
 
+Use **Remove** next to a downloaded model to free its storage. If you remove
+the active model, Yboard switches to another installed model when available.
+After removing the last model, download a model to resume predictions and glide
+typing. Removed models can be downloaded again from the same screen.
+
 While typing, word suggestions come from the selected model. The old dictionary, phrase corpus, learned
 pair ranking, cloud prediction requests and emoji suggestion fallback are disconnected
 from the word strip. Explicit text shortcuts and email helper buttons remain available.
