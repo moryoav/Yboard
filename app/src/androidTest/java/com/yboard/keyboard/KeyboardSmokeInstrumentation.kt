@@ -33,6 +33,10 @@ class KeyboardSmokeInstrumentation : Instrumentation() {
                 result.putString("result", QwenChecks.switch(this, args.getString("model")))
             } else if (mode == "prediction_benchmark") {
                 result.putString("result", QwenChecks.benchmark(this))
+            } else if (mode == "glide_rank_benchmark") {
+                result.putString("result", QwenChecks.glideBenchmark(this))
+            } else if (mode == "glide_ime_benchmark") {
+                result.putString("result", PredictionImeChecks(this).glideBenchmark())
             } else if (mode == "prediction_ime") {
                 result.putString("result", PredictionImeChecks(this).run())
             } else if (mode == "update_notifications") {

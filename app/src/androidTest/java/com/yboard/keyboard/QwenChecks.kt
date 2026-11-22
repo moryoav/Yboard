@@ -79,6 +79,7 @@ internal object QwenChecks {
             val candidates = listOf("there", "three", "the")
             val initial = rank("I will be", candidates)
             check(LocalQwen.status.value.model == first)
+            checkPreparedRanking("I will be", candidates, initial)
             val cancelled = CountDownLatch(1)
             var stale: Result<DoubleArray>? = null
             instrumentation.runOnMainSync {
@@ -108,13 +109,7 @@ internal object QwenChecks {
         val report = JSONArray()
         val next = listOf("I will be", "Thanks for sharing the", "אני רוצה לשתות")
         val completions = listOf("See you" to "tom", "I will bring the" to "bo", "אני רוצה לשתות" to "מ")
-        val english = listOf("there", "three", "the", "their", "then", "these", "them", "they",
-            "where", "here", "tree", "through", "though", "thought", "thread", "those", "threw",
-            "throw", "throat", "threat", "theater", "theory", "theme", "therefore")
-        val hebrew = listOf("מים", "שמים", "יין", "מיץ", "חלב", "תה", "קפה", "סודה",
-            "משקה", "בירה", "מרק", "מחר", "מפה", "מיד", "מישהו", "משהו", "מתוק",
-            "טוב", "שלום", "בוקר", "עכשיו", "לחם", "פרי", "אוכל")
-        val glides = listOf("I will be" to english, "My favorite number is" to english, "אני רוצה לשתות" to hebrew)
+        val glides = glideFixtures()
         try {
             for (model in QwenModel.Variant.entries) {
                 check(QwenModel.state.value[model].ready) { "Download ${model.label} first" }
@@ -134,7 +129,6 @@ internal object QwenChecks {
                     output.elapsedMs
                 }
                 val glideTimes = glides.map { (sentence, words) ->
-                    check(words.size == 24)
                     val start = SystemClock.elapsedRealtime()
                     val scores = rank(sentence, words)
                     val elapsed = SystemClock.elapsedRealtime() - start
@@ -152,11 +146,67 @@ internal object QwenChecks {
         return report.toString()
     }
 
+    private fun glideFixtures(): List<Pair<String, List<String>>> {
+        val english = listOf("there", "three", "the", "their", "then", "these", "them", "they",
+            "where", "here", "tree", "through", "though", "thought", "thread", "those", "threw",
+            "throw", "throat", "threat", "theater", "theory", "theme", "therefore")
+        val hebrew = listOf("מים", "שמים", "יין", "מיץ", "חלב", "תה", "קפה", "סודה",
+            "משקה", "בירה", "מרק", "מחר", "מפה", "מיד", "מישהו", "משהו", "מתוק",
+            "טוב", "שלום", "בוקר", "עכשיו", "לחם", "פרי", "אוכל")
+        return listOf("I will be" to english, "My favorite number is" to english, "אני רוצה לשתות" to hebrew)
+    }
+
+    /** Identical batches can be replayed against two builds to compare exact scores and wall time. */
+    fun glideBenchmark(instrumentation: Instrumentation): String {
+        QwenModel.init(instrumentation.targetContext)
+        val saved = QwenModel.selected
+        val report = JSONArray()
+        try {
+            for (model in QwenModel.Variant.entries) {
+                check(QwenModel.state.value[model].ready) { "Download ${model.label} first" }
+                instrumentation.runOnMainSync { QwenModel.select(model) }
+                rank("I have a plan", listOf("for", "and", "now"))
+                val batches = glideFixtures().map { (sentence, words) ->
+                    check(words.size == 24)
+                    val reference = rank(sentence, words)
+                    check(reference.size == words.size && reference.all { it.isFinite() })
+                    val times = List(4) {
+                        val start = SystemClock.elapsedRealtimeNanos()
+                        val scores = rank(sentence, words)
+                        check(scores.contentEquals(reference)) { "Repeated ranking changed for ${model.label}" }
+                        (SystemClock.elapsedRealtimeNanos() - start) / 1_000_000.0
+                    }
+                    JSONObject().put("sentence", sentence).put("ms", JSONArray(times))
+                        .put("scoreBits", JSONArray(reference.map { it.toRawBits().toString(16) }))
+                }
+                report.put(JSONObject().put("model", model.label).put("batches", JSONArray(batches)))
+            }
+        } finally {
+            instrumentation.runOnMainSync { QwenModel.select(saved) }
+        }
+        return report.toString()
+    }
+
     private fun rank(sentence: String, candidates: List<String>): DoubleArray {
         val done = CountDownLatch(1)
         var scores: Result<DoubleArray>? = null
         LocalQwen.rank(sentence, candidates) { scores = it; done.countDown() }
         check(done.await(60, TimeUnit.SECONDS)) { "Ranking timed out" }
         return checkNotNull(scores).getOrThrow()
+    }
+
+    private fun checkPreparedRanking(sentence: String, candidates: List<String>, expected: DoubleArray) {
+        val prepared = LocalQwen.prepare(sentence)
+        val done = CountDownLatch(1)
+        var scores: Result<DoubleArray>? = null
+        val ranked = LocalQwen.rank(sentence, candidates, prepared) { scores = it; done.countDown() }
+        check(ranked == prepared) { "Ranking cancelled its matching context preparation" }
+        check(done.await(60, TimeUnit.SECONDS) && checkNotNull(scores).getOrThrow().contentEquals(expected))
+
+        val stale = LocalQwen.prepare("An older sentence")
+        val fallback = CountDownLatch(1)
+        val replacement = LocalQwen.rank(sentence, candidates, stale) { scores = it; fallback.countDown() }
+        check(replacement != stale) { "Ranking reused preparation from another sentence" }
+        check(fallback.await(60, TimeUnit.SECONDS) && checkNotNull(scores).getOrThrow().contentEquals(expected))
     }
 }

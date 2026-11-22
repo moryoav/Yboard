@@ -595,6 +595,12 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     }
 
     private fun cancelAiPredictions() {
+        resetPredictionRequests()
+        preparedSwipe = null
+        LocalQwen.cancel()
+    }
+
+    private fun resetPredictionRequests() {
         localRound++
         localPending?.let { main.removeCallbacks(it) }
         localPending = null
@@ -603,7 +609,6 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
             pendingSwipes.clear()
             clearStrip()
         }
-        LocalQwen.cancel()
     }
 
     private fun localAllowed() = predictionFieldActive && suggestionsAllowed && learningAllowed &&
@@ -1067,14 +1072,24 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
 
     // --------------------------------------------------------- swipe typing
 
+    private data class PreparedSwipe(val connection: InputConnection, val target: EditorTarget, val ticket: Long)
+    private var preparedSwipe: PreparedSwipe? = null
+
     override fun onSwipeStart() {
+        preparedSwipe = null
         dismissWordReplacement()
         if (swipePending || !localAllowed() || !QwenModel.selectedState.ready) return
-        val input = localInput() ?: return
-        LocalQwen.prepare(input.context + input.prefix)
+        val connection = currentInputConnection ?: return
+        val target = editorTarget(connection) ?: return
+        val before = if (isStandalonePronoun(target)) target.before.dropLast(1) + "I" else target.before
+        val context = swipeContext(before, target.cursor ?: selEnd) ?: return
+        resetPredictionRequests()
+        preparedSwipe = PreparedSwipe(connection, target, LocalQwen.prepare(context))
     }
 
     override fun onSwipe(path: List<Pt>, keyCenters: Map<Char, Pt>, keyWidth: Float) {
+        val preparation = preparedSwipe
+        preparedSwipe = null
         endVoice()
         if (!settings.swipeTyping || !localAllowed() || editorInfo?.let { EditorPolicy.glide(it.inputType) } != true) return
         val model = QwenModel.selectedState
@@ -1086,10 +1101,10 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
             pendingSwipes.addLast(candidates)
             return
         }
-        cancelAiPredictions()
+        resetPredictionRequests()
         pendingSwipes.addLast(candidates)
         showModelNote("Reading swipe…")
-        recognizeNextSwipe()
+        recognizeNextSwipe(preparation)
     }
 
     private data class EditorTarget(val before: String, val after: String?, val cursor: Int?)
@@ -1246,7 +1261,15 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         }
     }
 
-    private fun recognizeNextSwipe() {
+    private fun swipeContext(before: String, cursor: Int): String? {
+        val input = SentenceContext.capture(before, cursor)
+        if (before.length >= SentenceContext.READ_LIMIT && cursor > before.length &&
+            input.context.length >= before.length - input.prefix.length) return null
+        return if (before.lastOrNull()?.isWhitespace() == false)
+            SentenceContext.capture("$before ", cursor + 1).context else input.context
+    }
+
+    private fun recognizeNextSwipe(preparation: PreparedSwipe? = null) {
         val candidates = pendingSwipes.first()
         val connection = currentInputConnection
         val target = connection?.let { editorTarget(it) }
@@ -1257,19 +1280,16 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         }
         val capitalizeBefore = isStandalonePronoun(target)
         val before = if (capitalizeBefore) target.before.dropLast(1) + "I" else target.before
-        val cursor = target.cursor ?: selEnd
-        val input = SentenceContext.capture(before, cursor)
-        if (before.length >= SentenceContext.READ_LIMIT && cursor > before.length &&
-            input.context.length >= before.length - input.prefix.length) {
+        val context = swipeContext(before, target.cursor ?: selEnd)
+        if (context == null) {
             cancelAiPredictions()
             showModelNote("Sentence too long")
             return
         }
-        val context = if (before.lastOrNull()?.isWhitespace() == false)
-            SentenceContext.capture("$before ", cursor + 1).context else input.context
+        val preparedTicket = preparation?.takeIf { it.connection === connection && it.target == target }?.ticket
         val round = localRound
         val casing = shift
-        LocalQwen.rank(context, candidates.map { it.word }) { result ->
+        LocalQwen.rank(context, candidates.map { it.word }, preparedTicket) { result ->
             if (round != localRound) return@rank
             if (currentInputConnection !== connection || !localAllowed() || editorTarget(connection) != target) {
                 cancelAiPredictions()

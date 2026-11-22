@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.12.5
+
+- Reduced duplicate work when scoring glide candidates and reused sentence preparation from the current gesture.
+
 ## 1.12.4
 
 - Kept plausible glide words in contention when a turn clips one key, so sentence context can help pick the word.

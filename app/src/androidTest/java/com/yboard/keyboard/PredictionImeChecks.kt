@@ -8,10 +8,12 @@ import com.yboard.keyboard.keyboard.KeyDef
 import com.yboard.keyboard.keyboard.KeyType
 import com.yboard.keyboard.keyboard.KeyboardRootView
 import com.yboard.keyboard.keyboard.KeyboardView
+import com.yboard.keyboard.local.QwenModel
 import com.yboard.keyboard.settings.Prefs
 import com.yboard.keyboard.text.Pt
 import com.yboard.keyboard.text.SentenceContext
 import com.yboard.keyboard.text.Suggester
+import org.json.JSONArray
 import org.json.JSONObject
 
 /** Real service, separate app editor and actual local model. Synthetic text only. */
@@ -24,11 +26,12 @@ internal class PredictionImeChecks(private val instrumentation: Instrumentation)
     }
     private fun field(name: String) = YboardIME::class.java.getDeclaredField(name).apply { isAccessible = true }
     @Suppress("UNCHECKED_CAST") private fun slots() = field("slotWords").get(ime) as List<String>
+    private fun keyboard() = (field("root").get(ime) as KeyboardRootView).keyboard
     private fun pendingSwipes() = (field("pendingSwipes").get(ime) as Collection<*>).size
     private fun text() = ime.currentInputConnection?.getTextBeforeCursor(SentenceContext.READ_LIMIT, 0)?.toString().orEmpty()
     private fun draft() = text() + ime.currentInputConnection.getTextAfterCursor(SentenceContext.READ_LIMIT, 0)?.toString().orEmpty()
-    private fun touchGlide(word: String) {
-        val keyboard = (field("root").get(ime) as KeyboardRootView).keyboard
+    private fun touchGlide(word: String, beforeLift: () -> Unit = {}) {
+        val keyboard = keyboard()
         val method = KeyboardView::class.java.getDeclaredMethod("keyCenters").apply { isAccessible = true }
         @Suppress("UNCHECKED_CAST") val centers = method.invoke(keyboard) as Map<Char, Pt>
         val started = SystemClock.uptimeMillis()
@@ -38,6 +41,7 @@ internal class PredictionImeChecks(private val instrumentation: Instrumentation)
         }
         send(MotionEvent.ACTION_DOWN, centers.getValue(word.first()))
         word.drop(1).forEach { send(MotionEvent.ACTION_MOVE, centers.getValue(it)) }
+        beforeLift()
         send(MotionEvent.ACTION_UP, centers.getValue(word.last()))
     }
     private fun await(label: String, timeoutMs: Long = 20_000, condition: () -> Boolean): Long {
@@ -75,6 +79,49 @@ internal class PredictionImeChecks(private val instrumentation: Instrumentation)
         await("synthetic editor connection") { text() == value }
         return true
     }
+
+    /** Measures the real IME from synthetic finger lift until the editor receives the word. */
+    fun glideBenchmark(): String {
+        Prefs.init(instrumentation.targetContext)
+        val saved = Prefs.current
+        val report = JSONArray()
+        val fixtures = listOf(
+            Triple("en", "I will be ", "there"),
+            Triple("en", "We talked about the plans for the week and ".repeat(10) + "I will be ", "there"),
+            Triple("he", "אני רוצה לשתות ", "מים"),
+        )
+        try {
+            for ((language, prefix, word) in fixtures) {
+                // Isolate glide preparation from background next-word requests.
+                onMain { Prefs.update { it.copy(language = language, english = true, hebrew = true, suggestions = true, nextWords = false,
+                    learnWords = false, autoCaps = false, swipeTyping = true) } }
+                var expectedStrip: List<String>? = null
+                val times = mutableListOf<Double>()
+                repeat(6) { trial ->
+                    launch(prefix)
+                    await("glide keyboard ready") { keyboard().gestureTyping && keyboard().width > 0 }
+                    var lifted = 0L
+                    onMain {
+                        touchGlide(word) {
+                            // Simulate the worker time available during a short gesture.
+                            SystemClock.sleep(200)
+                            lifted = SystemClock.elapsedRealtimeNanos()
+                        }
+                    }
+                    await("glide benchmark $language $trial") { draft() == prefix + word && slots().getOrNull(1) == word }
+                    times += (SystemClock.elapsedRealtimeNanos() - lifted) / 1_000_000.0
+                    onMain {
+                        if (expectedStrip == null) expectedStrip = slots().toList()
+                        check(expectedStrip == slots()) { "Replay produced different alternatives" }
+                    }
+                }
+                report.put(JSONObject().put("language", language).put("contextLength", prefix.length)
+                    .put("ms", JSONArray(times.drop(1))).put("strip", JSONArray(expectedStrip)))
+            }
+        } finally { onMain { Prefs.update { saved } } }
+        return JSONObject().put("model", QwenModel.selected.label).put("glides", report).toString()
+    }
+
     fun run(): String {
         Prefs.init(instrumentation.targetContext)
         val saved = Prefs.current

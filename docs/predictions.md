@@ -40,6 +40,7 @@ sentence in a shared-context batch. The final score combines that model probabil
 with path distance. Geometry allows one rounded turn and still checks that the
 path passes the keys in order. The model resolves linguistic
 ambiguities. A gesture starts preparing the context before the finger lifts.
+Ranking reuses that preparation when the editor target and model still match.
 
 Tapping inside an earlier word in an editable draft opens replacement suggestions
 automatically. The replacements stay available when the caret moves from inside the
@@ -88,3 +89,7 @@ on the actual device.
 `prediction_benchmark` times the three installed models on the same synthetic
 English and Hebrew next-word, prefix, and 24-candidate glide ranking workloads
 after an initial warm-up prediction.
+`glide_rank_benchmark` reports repeated warm ranking times and exact score bits
+for those 24-candidate batches. `glide_ime_benchmark` replays English and Hebrew
+touches with a fixed interval before release and reports time from release to
+editor insertion, along with the suggestion strip.

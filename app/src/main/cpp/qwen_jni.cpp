@@ -317,10 +317,14 @@ struct Engine {
         if (words.size() > MAX_CANDIDATES) throw std::runtime_error("Too many swipe candidates");
         std::vector<std::vector<llama_token>> tokens;
         std::vector<double> scores(words.size(), -std::numeric_limits<double>::infinity());
-        std::vector<std::vector<float>> outputs(words.size(), root_logits);
+        std::vector<double> next_scores(words.size());
+        const double root_total = log_sum(root_logits.data(), vocabulary);
         for (size_t i = 0; i < words.size(); ++i) {
             tokens.push_back(tokenize((text.empty() ? "" : " ") + words[i], false));
-            if (!tokens.back().empty() && tokens.back().size() <= 32) scores[i] = 0;
+            if (!tokens.back().empty() && tokens.back().size() <= 32) {
+                scores[i] = 0;
+                next_scores[i] = root_logits[tokens.back().front()] - root_total;
+            }
             llama_memory_seq_cp(llama_get_memory(context), 0, i + 1, -1, -1);
         }
         for (size_t depth = 0; depth < 32; ++depth) {
@@ -332,20 +336,23 @@ struct Engine {
             batch.n_tokens = active.size();
             for (size_t j = 0; j < active.size(); ++j) {
                 int i = active[j];
-                scores[i] += outputs[i][tokens[i][depth]] - log_sum(outputs[i].data(), vocabulary);
+                scores[i] += next_scores[i];
                 batch.token[j] = tokens[i][depth]; batch.pos[j] = cached.size() + depth;
                 batch.n_seq_id[j] = 1; batch.seq_id[j][0] = i + 1; batch.logits[j] = true;
             }
             try { decode(batch); } catch (...) { llama_batch_free(batch); throw; }
             for (size_t j = 0; j < active.size(); ++j) {
-                const float * output = llama_get_logits_ith(context, j);
-                if (!output) { llama_batch_free(batch); throw std::runtime_error("Missing swipe probabilities"); }
-                outputs[active[j]].assign(output, output + vocabulary);
+                const int i = active[j];
+                const float * logits = llama_get_logits_ith(context, j);
+                if (!logits) { llama_batch_free(batch); throw std::runtime_error("Missing swipe probabilities"); }
+                if (!std::isfinite(scores[i])) continue;
+                // Read the next token or word boundary while this batch's logits are still valid.
+                const double total = log_sum(logits, vocabulary);
+                if (depth + 1 < tokens[i].size()) next_scores[i] = logits[tokens[i][depth + 1]] - total;
+                else scores[i] += boundary_log_probability(logits, total);
             }
             llama_batch_free(batch);
         }
-        for (size_t i = 0; i < words.size(); ++i) if (std::isfinite(scores[i]))
-            scores[i] += boundary_log_probability(outputs[i].data(), log_sum(outputs[i].data(), vocabulary));
         branches_clear(); check();
         return scores;
     }

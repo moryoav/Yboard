@@ -26,6 +26,8 @@ object LocalQwen {
     private val worker = ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS, LinkedBlockingQueue(1),
         { task -> Thread(task, "YboardQwen") }, ThreadPoolExecutor.DiscardOldestPolicy())
     @Volatile private var ticket = 0L
+    private data class Preparation(val context: String, val model: QwenModel.Variant)
+    private var preparation: Preparation? = null // guarded by this object's monitor
     private var onRankCancelled: (() -> Unit)? = null
     private var handle = 0L // worker thread only
     private var loadedModel: QwenModel.Variant? = null // worker thread only
@@ -36,6 +38,7 @@ object LocalQwen {
     @Synchronized fun cancel(): Long {
         ticket = try { QwenNative.cancel() } catch (_: LinkageError) { ticket + 1 }
         worker.queue.clear()
+        preparation = null
         onRankCancelled?.let { main.post { it() } }
         onRankCancelled = null
         return ticket
@@ -92,9 +95,10 @@ object LocalQwen {
         }
     }
 
-    fun prepare(context: String): Long {
+    @Synchronized fun prepare(context: String): Long {
         val model = QwenModel.selected
         val id = cancel()
+        preparation = Preparation(context, model)
         worker.execute {
             if (id != ticket) return@execute
             runCatching { ensureLoaded(model); if (id == ticket) QwenNative.prepare(handle, context, id) }
@@ -125,9 +129,16 @@ object LocalQwen {
         return id
     }
 
-    @Synchronized fun rank(context: String, words: List<String>, callback: (kotlin.Result<DoubleArray>) -> Unit): Long {
+    @Synchronized fun rank(
+        context: String,
+        words: List<String>,
+        preparedTicket: Long? = null,
+        callback: (kotlin.Result<DoubleArray>) -> Unit,
+    ): Long {
         val model = QwenModel.selected
-        val id = cancel()
+        // Keep an in-flight preparation for the same context alive on the serial model worker.
+        val id = if (preparedTicket == ticket && preparation == Preparation(context, model)) ticket else cancel()
+        preparation = null
         onRankCancelled = { callback(kotlin.Result.failure(CancellationException())) }
         worker.execute {
             if (id != ticket) return@execute
