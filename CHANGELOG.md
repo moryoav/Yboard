@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.12.6
+
+- Enabled glide typing in browser address bars and other URL fields. Word suggestions, autocorrect, and learning stay off in these fields.
+
 ## 1.12.5
 
 - Reduced duplicate work when scoring glide candidates and reused sentence preparation from the current gesture.

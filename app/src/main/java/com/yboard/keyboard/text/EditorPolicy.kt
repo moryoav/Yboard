@@ -14,11 +14,14 @@ object EditorPolicy {
         )
     }
 
-    fun suggestions(inputType: Int): Boolean = glide(inputType) &&
+    fun url(inputType: Int): Boolean =
+        inputType and InputType.TYPE_MASK_CLASS == InputType.TYPE_CLASS_TEXT &&
+            inputType and InputType.TYPE_MASK_VARIATION == InputType.TYPE_TEXT_VARIATION_URI
+
+    fun suggestions(inputType: Int): Boolean = glide(inputType) && !url(inputType) &&
         inputType and InputType.TYPE_MASK_VARIATION !in setOf(
             InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
             InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS,
-            InputType.TYPE_TEXT_VARIATION_URI,
         )
 
     fun personalized(inputType: Int, imeOptions: Int): Boolean = suggestions(inputType) &&

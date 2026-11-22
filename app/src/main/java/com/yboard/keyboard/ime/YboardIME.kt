@@ -611,8 +611,19 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         }
     }
 
-    private fun localAllowed() = predictionFieldActive && suggestionsAllowed && learningAllowed &&
-        selStart == selEnd && voice?.isActive != true && emojiSearchBar == null && mode != Mode.NUMBER && mode != Mode.PHONE
+    private fun typingContextActive() = predictionFieldActive && voice?.isActive != true &&
+        emojiSearchBar == null && mode != Mode.NUMBER && mode != Mode.PHONE
+
+    private fun localAllowed() = suggestionsAllowed && learningAllowed && selStart == selEnd && typingContextActive()
+
+    private fun glideAllowed(): Boolean {
+        val info = editorInfo ?: return false
+        return settings.swipeTyping && EditorPolicy.glide(info.inputType) &&
+            (localAllowed() || EditorPolicy.url(info.inputType) && typingContextActive())
+    }
+
+    private fun glideTarget(connection: InputConnection) =
+        editorTarget(connection, allowSelection = editorInfo?.let { EditorPolicy.url(it.inputType) } == true)
 
     private fun localInput(): SentenceContext.Input? {
         if (selStart != selEnd || selEnd < 0) return null
@@ -1078,9 +1089,9 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     override fun onSwipeStart() {
         preparedSwipe = null
         dismissWordReplacement()
-        if (swipePending || !localAllowed() || !QwenModel.selectedState.ready) return
+        if (swipePending || !glideAllowed() || !QwenModel.selectedState.ready) return
         val connection = currentInputConnection ?: return
-        val target = editorTarget(connection) ?: return
+        val target = glideTarget(connection) ?: return
         val before = if (isStandalonePronoun(target)) target.before.dropLast(1) + "I" else target.before
         val context = swipeContext(before, target.cursor ?: selEnd) ?: return
         resetPredictionRequests()
@@ -1091,7 +1102,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         val preparation = preparedSwipe
         preparedSwipe = null
         endVoice()
-        if (!settings.swipeTyping || !localAllowed() || editorInfo?.let { EditorPolicy.glide(it.inputType) } != true) return
+        if (!glideAllowed()) return
         val model = QwenModel.selectedState
         if (!model.ready) { showModelNote(if (model.downloading) "Downloading model…" else "Download model"); return }
         val decoder = decoder ?: return
@@ -1107,22 +1118,29 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         recognizeNextSwipe(preparation)
     }
 
-    private data class EditorTarget(val before: String, val after: String?, val cursor: Int?)
+    private data class EditorTarget(val before: String, val after: String?, val cursor: Int?, val selected: String = "")
 
-    private fun editorTarget(connection: InputConnection, limit: Int = SentenceContext.READ_LIMIT, afterLimit: Int = 32): EditorTarget? {
+    private fun editorTarget(
+        connection: InputConnection,
+        limit: Int = SentenceContext.READ_LIMIT,
+        afterLimit: Int = 32,
+        allowSelection: Boolean = false,
+    ): EditorTarget? {
         if (Build.VERSION.SDK_INT >= 31) {
             connection.getSurroundingText(limit, afterLimit, 0)?.let { text ->
-                if (text.selectionStart != text.selectionEnd) return null
+                if (!allowSelection && text.selectionStart != text.selectionEnd) return null
                 return EditorTarget(
                     text.text.subSequence(0, text.selectionStart).toString(),
                     text.text.subSequence(text.selectionEnd, text.text.length).toString(),
                     text.offset.takeIf { it >= 0 }?.plus(text.selectionStart),
+                    text.text.subSequence(text.selectionStart, text.selectionEnd).toString(),
                 )
             }
         }
-        if (!connection.getSelectedText(0).isNullOrEmpty()) return null
+        val selected = connection.getSelectedText(0)?.toString().orEmpty()
+        if (!allowSelection && selected.isNotEmpty()) return null
         val before = connection.getTextBeforeCursor(limit, 0)?.toString() ?: return null
-        return EditorTarget(before, connection.getTextAfterCursor(afterLimit, 0)?.toString(), null)
+        return EditorTarget(before, connection.getTextAfterCursor(afterLimit, 0)?.toString(), null, selected)
     }
 
     private fun isWordElement(char: Char): Boolean = isWordChar(char) || char.isDigit()
@@ -1272,8 +1290,8 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     private fun recognizeNextSwipe(preparation: PreparedSwipe? = null) {
         val candidates = pendingSwipes.first()
         val connection = currentInputConnection
-        val target = connection?.let { editorTarget(it) }
-        if (connection == null || target == null || !localAllowed()) {
+        val target = connection?.let { glideTarget(it) }
+        if (connection == null || target == null || !glideAllowed()) {
             cancelAiPredictions()
             updateSuggestions()
             return
@@ -1291,7 +1309,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         val casing = shift
         LocalQwen.rank(context, candidates.map { it.word }, preparedTicket) { result ->
             if (round != localRound) return@rank
-            if (currentInputConnection !== connection || !localAllowed() || editorTarget(connection) != target) {
+            if (currentInputConnection !== connection || !glideAllowed() || glideTarget(connection) != target) {
                 cancelAiPredictions()
                 updateSuggestions()
                 return@rank
@@ -1311,7 +1329,8 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
             val word = alternatives.first()
             acceptSwipe()
             lastAutoCorrect = null
-            val space = if (before.lastOrNull()?.let { it.isLetterOrDigit() || it in ".,!?:;" } == true) " " else ""
+            val space = if (target.selected.isEmpty() &&
+                before.lastOrNull()?.let { it.isLetterOrDigit() || it in ".,!?:;" } == true) " " else ""
             suggestionSpace = null
             val insert = space + word
             val committed = if (capitalizeBefore) commitCapitalizedPronoun(connection, target, insert)
@@ -1323,18 +1342,22 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
             }
             if (shift == ShiftState.ON) setShift(ShiftState.OFF)
             lastSwipe = SwipeCommit(word, alternatives, before, target.cursor?.plus(insert.length))
-            if (recentSwipes.size == 32) recentSwipes.removeFirst()
-            recentSwipes.addLast(RecentSwipe(word, (before + space).takeLast(24),
-                target.cursor?.plus(space.length), alternatives))
+            if (suggestionsAllowed) {
+                if (recentSwipes.size == 32) recentSwipes.removeFirst()
+                recentSwipes.addLast(RecentSwipe(word, (before + space).takeLast(24),
+                    target.cursor?.plus(space.length), alternatives))
+            }
             lastSpaceTime = 0
             currentWord = ""
             if (swipePending) {
                 // Read the updated editor so the next word is ranked with this word as context.
                 updateAutoShift()
                 recognizeNextSwipe()
-            } else {
+            } else if (suggestionsAllowed) {
                 val others = alternatives.drop(1)
                 showStrip(listOf(others.getOrElse(0) { "" }, word, others.getOrElse(1) { "" }), 1)
+            } else {
+                clearStrip()
             }
         }
     }

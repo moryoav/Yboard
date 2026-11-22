@@ -2,7 +2,9 @@ package com.yboard.keyboard
 
 import android.app.Instrumentation
 import android.os.SystemClock
+import android.text.InputType
 import android.view.MotionEvent
+import android.view.inputmethod.EditorInfo
 import com.yboard.keyboard.ime.YboardIME
 import com.yboard.keyboard.keyboard.KeyDef
 import com.yboard.keyboard.keyboard.KeyType
@@ -218,6 +220,7 @@ internal class PredictionImeChecks(private val instrumentation: Instrumentation)
             SystemClock.sleep(1000)
             onMain { check(text() == "A new message x") }
             checkMixedTyping()
+            checkAddressBarGlide()
             launch("Private ", options = 0x1000000)
             onMain {
                 val allowed = YboardIME::class.java.getDeclaredMethod("localAllowed").apply { isAccessible = true }.invoke(ime) as Boolean
@@ -239,9 +242,34 @@ internal class PredictionImeChecks(private val instrumentation: Instrumentation)
             checkWordReplacement()
             checkReportedPredictions()
             launch("Finished ")
-            report.put("passed", "prefix completion, consecutive taps, punctuation after suggestions, literal spaces at a moved cursor, full sentence, model-ranked swipes, ordered glide queue, cursor and tap cancellation, spacing after completed glides, standalone I, private/password guards, clipped where glide, word-end glide alternatives, edge completion capitalization and next words after a space")
+            report.put("passed", "prefix completion, consecutive taps, punctuation after suggestions, literal spaces at a moved cursor, full sentence, model-ranked swipes, ordered glide queue, cursor and tap cancellation, spacing after completed glides, standalone I, address bar glide, private/password guards, clipped where glide, word-end glide alternatives, edge completion capitalization and next words after a space")
             return report.toString()
         } finally { onMain { Prefs.update { saved } } }
+    }
+
+    private fun checkAddressBarGlide() {
+        val urlInput = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI or
+            InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        val options = EditorInfo.IME_ACTION_GO or EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
+        launch("https://example.test", inputType = urlInput, options = options)
+        onMain { ime.currentInputConnection.setSelection(0, text().length) }
+        await("address selected") { ime.currentInputConnection.getSelectedText(0)?.toString() == "https://example.test" }
+        onMain {
+            check(keyboard().gestureTyping && slots().isEmpty() && !field("learningAllowed").getBoolean(ime))
+            touchGlide("how")
+        }
+        await("glide replaces selected address") { draft() == "how" && pendingSwipes() == 0 }
+        onMain {
+            check(slots().isEmpty())
+            touchGlide("many")
+        }
+        await("second address-bar glide appends a word") { draft() == "how many" && pendingSwipes() == 0 }
+        onMain {
+            check(slots().isEmpty())
+            ime.onText(" teh")
+            ime.onKey(KeyDef(KeyType.SPACE, " "))
+            check(draft() == "how many teh " && slots().isEmpty())
+        }
     }
 
     private fun checkReportedPredictions() {
