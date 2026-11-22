@@ -12,9 +12,9 @@ the active model, Yboard switches to another installed model when available.
 After removing the last model, download a model to resume predictions and glide
 typing. Removed models can be downloaded again from the same screen.
 
-While typing, word suggestions come from the selected model. The old dictionary, phrase corpus, learned
-pair ranking, cloud prediction requests and emoji suggestion fallback are disconnected
-from the word strip. Explicit text shortcuts and email helper buttons remain available.
+While typing, the selected model supplies and ranks word suggestions. The dictionary
+can supply their established spelling. Explicit text shortcuts and email helper buttons
+remain available.
 Old learned vocabulary can still supply names to the gesture lexicon; it does not
 supply prediction scores. Historical cloud prediction usage remains readable.
 
@@ -28,19 +28,22 @@ when needed. Very long sentences cost more time and memory.
 
 The model stays resident, reuses sentence token evaluation and computes candidates
 on one dedicated worker. New incompatible edits cancel old work. Compatible prefix
-updates can reuse an in-flight result. Model suggestions that match the current
-prefix are shown. Word scores include a word-boundary probability, so incomplete
-subword tokens are not treated as complete predictions. Suggestions remain stable
+updates can reuse an in-flight result. Model suggestions match the current prefix
+and use established spellings where available. Unrecognized mixed-case suggestions
+need support from the typed capitalization. Word scores include a word-boundary
+probability to distinguish complete words from partial tokens. Suggestions remain stable
 while the strip is pressed. Cold model loading is slower than warm inference.
 
 Swipe geometry and the existing lexicon supply up to 24 plausible matches without
 frequency scores. The model evaluates their conditional word probabilities against the
 sentence in a shared-context batch. The final score combines that model probability
-with path distance. Geometry still rejects impossible paths. The model resolves linguistic
+with path distance. Geometry allows one rounded turn and still checks that the
+path passes the keys in order. The model resolves linguistic
 ambiguities. A gesture starts preparing the context before the finger lifts.
 
 Tapping inside an earlier word in an editable draft opens replacement suggestions
-automatically. Yboard can reuse recent glide alternatives from the current editing
+automatically. The replacements stay available when the caret moves from inside the
+word to its end. Yboard can reuse recent glide alternatives from the current editing
 session. For other words, it offers nearby spellings from its English or Hebrew
 dictionary and ranks them with the selected model when available. Accepting a
 replacement edits only the target word and preserves surrounding text.

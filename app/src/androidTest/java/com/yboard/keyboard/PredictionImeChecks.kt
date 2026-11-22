@@ -11,6 +11,7 @@ import com.yboard.keyboard.keyboard.KeyboardView
 import com.yboard.keyboard.settings.Prefs
 import com.yboard.keyboard.text.Pt
 import com.yboard.keyboard.text.SentenceContext
+import com.yboard.keyboard.text.Suggester
 import org.json.JSONObject
 
 /** Real service, separate app editor and actual local model. Synthetic text only. */
@@ -189,10 +190,46 @@ internal class PredictionImeChecks(private val instrumentation: Instrumentation)
             }
             report.put("passwordKeyboard", if (ownPassword) "Yboard guarded" else "OnePlus protected keyboard")
             checkWordReplacement()
+            checkReportedPredictions()
             launch("Finished ")
-            report.put("passed", "prefix completion, consecutive taps, punctuation after suggestions, literal spaces at a moved cursor, full sentence, model-ranked swipes, ordered glide queue, cursor and tap cancellation, spacing after completed glides, standalone I, private/password guards")
+            report.put("passed", "prefix completion, consecutive taps, punctuation after suggestions, literal spaces at a moved cursor, full sentence, model-ranked swipes, ordered glide queue, cursor and tap cancellation, spacing after completed glides, standalone I, private/password guards, clipped where glide, word-end glide alternatives, edge completion capitalization and next words after a space")
             return report.toString()
         } finally { onMain { Prefs.update { saved } } }
+    }
+
+    private fun checkReportedPredictions() {
+        val sentence = "Sometimes, when I type, or glide, there seems to be an issue "
+        launch(sentence)
+        val centers = Suggester.keyPositions("en").mapValues { (_, p) -> Pt(p.first * 100, p.second * 140) }
+        val clipped = "where".map(centers::getValue).zip("edgre".map(centers::getValue)) { a, b ->
+            Pt(a.x + (b.x - a.x) * 0.4f, a.y + (b.y - a.y) * 0.4f)
+        }
+        onMain {
+            ime.onSwipeStart()
+            ime.onSwipe(clipped, centers, 100f)
+        }
+        await("clipped where glide") { draft() == sentence + "where" && slots().getOrNull(1) == "where" }
+        onMain { ime.currentInputConnection.setSelection(sentence.length + 2, sentence.length + 2) }
+        await("original glide alternatives inside the word") {
+            field("replacement").get(ime) != null && slots().contains("edge")
+        }
+        val wordEnd = sentence.length + "where".length
+        onMain { ime.currentInputConnection.setSelection(wordEnd, wordEnd) }
+        await("original glide alternatives at the terminal word end") {
+            text() == sentence + "where" && field("replacement").get(ime) != null && slots().contains("edge")
+        }
+        onMain { ime.onSuggestion(slots().indexOf("edge")) }
+        await("terminal replacement preserves surrounding text") { draft() == sentence + "edge" }
+
+        launch(sentence + "edge")
+        await("ordinary capitalization for constrained edge completions") {
+            slots().contains("edge") && slots().filter { it.isNotBlank() }.none { word -> word.drop(1).any { it.isUpperCase() } }
+        }
+        launch(sentence + "edge ")
+        await("next words after a literal space") {
+            field("replacement").get(ime) == null && field("currentWord").get(ime) == "" &&
+                slots().any { it.isNotBlank() } && slots().none { it.startsWith("edge", true) }
+        }
     }
 
     private fun checkMixedTyping() {

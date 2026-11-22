@@ -192,6 +192,18 @@ class Suggester(
             }
         }
 
+        /** Prefer established spellings and suppress mixed-case guesses unsupported by the prefix. */
+        internal fun modelCompletion(prefix: String, word: String, spelling: String?): String? {
+            if (!word.startsWith(prefix, ignoreCase = true)) return null
+            if (spelling != null) return applyCase(prefix, spelling)
+            if (prefix.isNotEmpty() && word.equals(prefix, ignoreCase = true)) return prefix
+            if (word.drop(1).none { it.isUpperCase() }) return applyCase(prefix, word)
+            if (prefix.isNotEmpty() && word.startsWith(prefix) &&
+                word.drop(prefix.length).none { it.isUpperCase() }) return word
+            if (word.none { it.isLowerCase() } && prefix.none { it.isLowerCase() }) return word
+            return null
+        }
+
         /** Letter key centers in "key units" (1 = one key) for the language's letter layout. */
         fun keyPositions(language: String): Map<Char, Pair<Float, Float>> {
             val layout = Layouts.build(Mode.LETTERS, language, numberRow = false, multiLang = true)

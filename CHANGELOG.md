@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.12.4
+
+- Kept plausible glide words in contention when a turn clips one key, so sentence context can help pick the word.
+- Fixed mixed-case model suggestions and kept glide alternatives available when the caret returns to the end of a word.
+
 ## 1.12.3
 
 - Recognized spoken periods between sentences during continuous dictation and preserved common literal uses such as “trial period”.

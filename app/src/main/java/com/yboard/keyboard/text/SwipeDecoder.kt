@@ -19,7 +19,7 @@ data class WordFreq(val word: String, val freq: Int)
  *  3. For every dictionary word that starts with a start key and ends with an end key, check that its
  *     letters (consecutive repeats collapsed; characters without a letter key, e.g. ' - ׳, skipped) are visited in
  *     order: each key must have a filter-path point within [PASS_RADIUS] key widths, at or after the
- *     previous letter's match.
+ *     previous letter's match. One interior key can use [CORNER_RADIUS] to allow rounded turns.
  *  4. Survivors are scored (lower is better), roughly a Gaussian negative log-likelihood:
  *        cost = weighted rigid/warped shape + ordered location + endpoint cost + frequency prior
  *     - shape: mean SQUARED distance between corresponding points of the user path and the word's
@@ -67,6 +67,7 @@ class SwipeDecoder(
     private val warpB = FloatArray(SAMPLES + 1)
     private var keyDist2 = FloatArray(0) // [key * filterCount + i] squared distance key centre -> filter point
     private var nearNext = IntArray(0) // [key * (filterCount + 1) + i] first j >= i with key near point j
+    private var relaxedNearNext = IntArray(0)
     private var isStartKey = BooleanArray(0)
     private var isEndKey = BooleanArray(0)
     private val startKeys = IntArray(MAX_END_KEYS)
@@ -133,7 +134,9 @@ class SwipeDecoder(
         // 2. Distances from every key to every filter point + "next near point" table.
         if (keyDist2.size < k * f) keyDist2 = FloatArray(k * f)
         if (nearNext.size < k * (f + 1)) nearNext = IntArray(k * (f + 1))
+        if (relaxedNearNext.size < k * (f + 1)) relaxedNearNext = IntArray(k * (f + 1))
         val r2 = PASS_RADIUS * PASS_RADIUS
+        val cornerRadius2 = CORNER_RADIUS * CORNER_RADIUS
         for (key in 0 until k) {
             val cx = keyX[key]
             val cy = keyY[key]
@@ -141,6 +144,8 @@ class SwipeDecoder(
             val nb = key * (f + 1)
             var next = f
             nearNext[nb + f] = f
+            var relaxedNext = f
+            relaxedNearNext[nb + f] = f
             for (i in f - 1 downTo 0) {
                 val dx = fx[i] - cx
                 val dy = fy[i] - cy
@@ -148,6 +153,8 @@ class SwipeDecoder(
                 keyDist2[db + i] = d2
                 if (d2 <= r2) next = i
                 nearNext[nb + i] = next
+                if (d2 <= cornerRadius2) relaxedNext = i
+                relaxedNearNext[nb + i] = relaxedNext
             }
         }
 
@@ -207,14 +214,7 @@ class SwipeDecoder(
         }
         if (letters < 2 || !isStartKey[seq[0]]) return
 
-        // In-order pass-through check.
-        val f = filterCount
-        val stride = f + 1
-        var pos = 0
-        for (j in 0 until m) {
-            pos = nearNext[seq[j] * stride + pos]
-            if (pos >= f) return
-        }
+        if (!passesKeys(m)) return
 
         // Frequency prior, used to prune before the expensive channels.
         val freq = wf.freq.coerceIn(1, 255)
@@ -253,8 +253,26 @@ class SwipeDecoder(
         if (bestCount == bestLimit && cost >= bestCost[bestCount - 1]) return
 
         // Location channel.
-        cost += W_LOC * orderedLocation(m, f)
+        cost += W_LOC * orderedLocation(m, filterCount)
         offer(word, cost)
+    }
+
+    private fun passesKeys(length: Int): Boolean {
+        val end = filterCount
+        val stride = end + 1
+        var strict = 0
+        var withRoundedCorner = end
+        for (i in 0 until length) {
+            val offset = seq[i] * stride
+            withRoundedCorner = nearNext[offset + withRoundedCorner]
+            // Permit one clipped interior corner. Endpoints and other letters still use the normal radius.
+            if (i > 0 && i < length - 1) {
+                withRoundedCorner = minOf(withRoundedCorner, relaxedNearNext[offset + strict])
+            }
+            strict = nearNext[offset + strict]
+            if (strict == end && withRoundedCorner == end) return false
+        }
+        return true
     }
 
     private fun warpedShape(): Float {
@@ -419,6 +437,7 @@ class SwipeDecoder(
 
         /** A letter "was passed" if the path comes within this many key widths of its centre. */
         const val PASS_RADIUS = 1.2f
+        private const val CORNER_RADIUS = 1.6f
 
         /** Spacing (key widths) of the dense filter path. */
         const val FILTER_STEP = 0.2f

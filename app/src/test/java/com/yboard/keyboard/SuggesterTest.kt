@@ -61,6 +61,19 @@ class SuggesterTest {
     }
 
     @Test
+    fun modelCompletionsKeepEstablishedAndTypedCapitalization() {
+        assertEquals("edge", Suggester.modelCompletion("edge", "eDGE", "edge"))
+        assertEquals("edges", Suggester.modelCompletion("edge", "eDges", "edges"))
+        assertNull(Suggester.modelCompletion("edge", "eDGEE", null))
+        assertNull(Suggester.modelCompletion("edge", "eDGEI", null))
+        assertNull(Suggester.modelCompletion("", "eDGEE", null))
+        assertEquals("iPhone", Suggester.modelCompletion("ip", "IPHONE", "iPhone"))
+        assertEquals("EDGE", Suggester.modelCompletion("EDG", "edge", "edge"))
+        assertEquals("eDGe", Suggester.modelCompletion("eDG", "eDGe", null))
+        assertEquals("מחר", Suggester.modelCompletion("מ", "מחר", "מחר"))
+    }
+
+    @Test
     fun leavesRealWordsAlone() {
         val s = english()
         listOf("the", "house", "keyboard", "hello", "thanks", "I").forEach {

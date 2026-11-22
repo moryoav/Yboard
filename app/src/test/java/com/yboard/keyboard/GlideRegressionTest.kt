@@ -11,6 +11,23 @@ import java.io.File
 import kotlin.random.Random
 
 class GlideRegressionTest {
+    @Test fun clippedWhereRemainsAvailableForContextualRanking() {
+        val dict = File("src/main/assets/dict/en.tsv").useLines { Dictionary.fromLines("en", it) }
+        val centers = Suggester.keyPositions("en").mapValues { (_, p) -> Pt(p.first * 100, p.second * 140) }
+        val keyPath = "where".map(centers::getValue)
+        val decoder = SwipeDecoder(dict::startingWith)
+        val path = keyPath.zip("edgre".map(centers::getValue)) { a, b ->
+            Pt(a.x + (b.x - a.x) * 0.4f, a.y + (b.y - a.y) * 0.4f)
+        }
+        val candidates = decoder.decodeScored(path, centers, 100f)
+        val scores = mapOf("where" to -4.3, "edge" to -15.2, "wedge" to -17.9)
+        val ranked = GlideRanking.rank(candidates, candidates.map { scores[it.word] ?: -25.0 }.toDoubleArray())
+        assertEquals("where", ranked.first())
+        assertTrue("edge" in ranked)
+
+        val clear = decoder.decodeScored("edge".map(centers::getValue), centers, 100f)
+        assertEquals("edge", GlideRanking.rank(clear, clear.map { scores[it.word] ?: -25.0 }.toDoubleArray()).first())
+    }
     @Test fun appSuggestionFlagsDoNotDisableGlide() {
         val plain = InputType.TYPE_CLASS_TEXT
         val keep = plain or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS

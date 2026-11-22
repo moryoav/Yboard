@@ -440,7 +440,9 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         selStart = newSelStart
         selEnd = newSelEnd
         if (oldSelEnd != newSelEnd) {
-            revisitWordEnd = if (newSelStart == newSelEnd && newSelEnd < oldSelEnd) newSelEnd else -1
+            val returnedToWordEnd = replacement?.end == newSelEnd
+            revisitWordEnd = if (newSelStart == newSelEnd && (newSelEnd < oldSelEnd || returnedToWordEnd))
+                newSelEnd else -1
         }
         suggestionSpace?.let {
             if (newSelStart != it.cursor || newSelEnd != it.cursor) suggestionSpace = null
@@ -625,16 +627,16 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     }
 
     private fun renderLocal(input: SentenceContext.Input): Boolean {
-        val words = if (qwenInput?.sameWord(input) == true) qwenWords.filter { it.startsWith(input.prefix, true) } else emptyList()
+        val words = localCompletions(input)
         if (words.isEmpty()) return false
         if (root?.toolbar?.suggestionTouchActive == true) {
             val round = localRound
             main.postDelayed({ if (round == localRound) updateSuggestions() }, 32)
             return true
         }
-        val cased = words.take(3).map { word ->
-            if (input.prefix.isNotEmpty()) Suggester.applyCase(input.prefix, word)
-            else if (shift != ShiftState.OFF && settings.activeLanguage == "en") word.replaceFirstChar { it.uppercaseChar() }
+        val cased = words.map { word ->
+            if (input.prefix.isEmpty() && shift != ShiftState.OFF && settings.activeLanguage == "en")
+                word.replaceFirstChar { it.uppercaseChar() }
             else word
         }
         currentWord = input.prefix
@@ -643,14 +645,26 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         return true
     }
 
+    private fun localCompletions(input: SentenceContext.Input): List<String> {
+        if (qwenInput?.sameWord(input) != true) return emptyList()
+        val dictionary = dictionaries[settings.activeLanguage]
+        val user = if (settings.learnWords) userWords() else null
+        return qwenWords.mapNotNull { word ->
+            val normalized = Dictionary.normalize(word)
+            val spelling = dictionary?.spelling(normalized)
+                ?: user?.takeIf { it.isKnown(normalized) }?.spelling(normalized)
+            Suggester.modelCompletion(input.prefix, word, spelling)
+        }.distinct().take(3)
+    }
+
     private fun requestLocal(input: SentenceContext.Input) {
         val model = QwenModel.selectedState
         if (!model.ready) { showModelNote(if (model.downloading) "Downloading model…" else "Download model"); return }
         val requested = qwenRequested
         if (requested?.sameWord(input) == true && input.prefix.startsWith(requested.prefix, true)) return
         val prior = qwenInput
-        if (prior?.sameWord(input) == true && input.prefix.startsWith(prior.prefix, true) && qwenWords.any { it.startsWith(input.prefix, true) }) return
-        if (qwenInput == input && qwenWords.isNotEmpty()) return
+        if (prior?.sameWord(input) == true && input.prefix.startsWith(prior.prefix, true) && localCompletions(input).isNotEmpty()) return
+        if (prior == input) return
         if (failedInput == input && SystemClock.elapsedRealtime() < retryAfter) return
         cancelAiPredictions()
         val round = localRound
@@ -760,7 +774,11 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         if (input.prefix.isEmpty() && !settings.nextWords) { cancelAiPredictions(); clearStrip(); return }
         if (qwenInput?.sameWord(input) == false) { qwenInput = null; qwenWords = emptyList() }
         val engine = LocalQwen.status.value
-        if (!renderLocal(input)) showModelNote(if (engine.model == predictionModel && engine.loading) "Loading model…" else "Predicting…")
+        if (!renderLocal(input)) showModelNote(when {
+            qwenInput == input -> "No prediction"
+            engine.model == predictionModel && engine.loading -> "Loading model…"
+            else -> "Predicting…"
+        })
         requestLocal(input)
     }
 
@@ -1153,7 +1171,8 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         val after = editor.after ?: return false
         val cursor = editor.cursor ?: selEnd
         if (cursor < 0 || cursor != selEnd) return false
-        val span = WordReplacement.atCursor(editor.before, after, revisitWordEnd == cursor && after.isNotEmpty())
+        val includeWordEnd = revisitWordEnd == cursor && (after.isNotEmpty() || replacement?.end == cursor)
+        val span = WordReplacement.atCursor(editor.before, after, includeWordEnd)
             ?: return false
         val target = Replacement(connection, editor, cursor, span, MyWords.languageOf(span.word))
         if (target.start < 0) return false
