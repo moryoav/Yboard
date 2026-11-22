@@ -93,6 +93,7 @@ class ToolbarView(context: Context) : View(context) {
             cancelSuggestionPress()
             pressed = null
             shortcuts = s.toolbarShortcuts.visible
+            laidOutWidth = -1
         }
         settings = s
         invalidate()
@@ -144,11 +145,12 @@ class ToolbarView(context: Context) : View(context) {
             }
             suggest -> buildList {
                 // Suggestions go where the first shortcut that they replace used to be.
-                val firstReplaced = shortcuts.indexOfFirst { !it.staysWithSuggestions }
+                val keeps = settings.toolbarShortcuts::keepsDuringSuggestions
+                val firstReplaced = shortcuts.indexOfFirst { !keeps(it) }
                 val split = if (firstReplaced >= 0) firstReplaced else if (shortcuts.firstOrNull() == MENU) 1 else 0
                 addAll(shortcuts.take(split))
                 add(null)
-                addAll(shortcuts.drop(split).filter { it.staysWithSuggestions })
+                addAll(shortcuts.drop(split).filter(keeps))
             }
             else -> shortcuts
         }
@@ -212,19 +214,24 @@ class ToolbarView(context: Context) : View(context) {
     override fun onInitializeAccessibilityNodeInfo(info: AccessibilityNodeInfo) {
         super.onInitializeAccessibilityNodeInfo(info)
         info.className = javaClass.name
-        if (listener != null && !voiceOn && STICKER in shortcuts) {
+        if (listener != null && showsSticker()) {
             info.addAction(AccessibilityNodeInfo.AccessibilityAction(R.id.action_create_sticker, "Create sticker from message"))
         }
     }
 
     override fun performAccessibilityAction(action: Int, arguments: Bundle?): Boolean {
-        if (action == R.id.action_create_sticker && !voiceOn && STICKER in shortcuts) {
+        if (action == R.id.action_create_sticker && showsSticker()) {
             listener?.let {
                 it.onToolbar(STICKER)
                 return true
             }
         }
         return super.performAccessibilityAction(action, arguments)
+    }
+
+    private fun showsSticker(): Boolean {
+        updateSlots()
+        return slots.any { it.shortcut == STICKER }
     }
 
     private fun drawVoiceStatus(canvas: Canvas, status: String, slot: Slot, cy: Float) {

@@ -34,6 +34,8 @@ import com.yboard.keyboard.settings.ToolbarShortcut
 import com.yboard.keyboard.settings.ToolbarShortcuts
 import com.yboard.keyboard.settings.YboardSettings
 
+internal const val STICKERS_WITH_SUGGESTIONS = "Stickers with suggestions"
+
 @Composable
 fun ToolbarScreen(settings: YboardSettings, onBack: () -> Unit) {
     val shortcuts = settings.toolbarShortcuts
@@ -76,6 +78,16 @@ fun ToolbarScreen(settings: YboardSettings, onBack: () -> Unit) {
                     if (index > 0) RowDivider()
                     ToolbarShortcutRow(shortcut, index, shortcuts)
                 }
+            }
+        }
+        Section("While typing") {
+            SwitchRow(
+                STICKERS_WITH_SUGGESTIONS,
+                "Show the sticker button beside word suggestions",
+                checked = shortcuts.stickerWithSuggestions,
+                enabled = ToolbarShortcut.STICKER !in shortcuts.hidden,
+            ) { show ->
+                Prefs.update { it.copy(toolbarShortcuts = it.toolbarShortcuts.copy(stickerWithSuggestions = show)) }
             }
         }
     }

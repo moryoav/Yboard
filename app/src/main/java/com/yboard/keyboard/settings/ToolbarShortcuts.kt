@@ -13,16 +13,21 @@ enum class ToolbarShortcut(val label: String, val icon: Int) {
     SPRINKLE("Emoji sprinkle", R.drawable.ic_emoji_sparkle),
     EMOJI("Emoji picker", R.drawable.ic_emoji),
     STICKER("Stickers", R.drawable.ic_sticker),
-    MIC("Voice typing", R.drawable.ic_mic);
-
-    val staysWithSuggestions: Boolean get() = this == MENU || this == STICKER || this == MIC
+    MIC("Voice typing", R.drawable.ic_mic),
 }
 
 data class ToolbarShortcuts(
     val order: List<ToolbarShortcut> = ToolbarShortcut.entries,
     val hidden: Set<ToolbarShortcut> = setOf(ToolbarShortcut.EMOJI),
+    val stickerWithSuggestions: Boolean = true,
 ) {
     val visible: List<ToolbarShortcut> get() = order.filterNot { it in hidden }
+
+    fun keepsDuringSuggestions(shortcut: ToolbarShortcut): Boolean = when (shortcut) {
+        ToolbarShortcut.MENU, ToolbarShortcut.MIC -> true
+        ToolbarShortcut.STICKER -> stickerWithSuggestions
+        else -> false
+    }
 
     fun withVisibility(shortcut: ToolbarShortcut, visible: Boolean): ToolbarShortcuts =
         copy(hidden = if (visible) hidden - shortcut else hidden + shortcut)
@@ -37,6 +42,7 @@ data class ToolbarShortcuts(
     fun toJson(): JSONObject = JSONObject()
         .put("order", JSONArray(order.map { it.name }))
         .put("hidden", JSONArray(hidden.map { it.name }))
+        .put("stickerWithSuggestions", stickerWithSuggestions)
 
     companion object {
         fun fromJson(json: JSONObject?, legacySprinkle: Boolean): ToolbarShortcuts {
@@ -47,6 +53,7 @@ data class ToolbarShortcuts(
             return ToolbarShortcuts(
                 order = savedOrder + newShortcuts,
                 hidden = savedHidden + newShortcuts.filter { it in defaults.hidden },
+                stickerWithSuggestions = json.optBoolean("stickerWithSuggestions", defaults.stickerWithSuggestions),
             )
         }
 

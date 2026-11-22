@@ -4,6 +4,7 @@ import com.yboard.keyboard.settings.ToolbarShortcut.*
 import com.yboard.keyboard.settings.ToolbarShortcuts
 import com.yboard.keyboard.settings.YboardSettings
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -45,5 +46,15 @@ class ToolbarShortcutsTest {
         val knownOrder = listOf(STICKER, MENU)
         assertEquals(knownOrder + (ToolbarShortcuts().order - knownOrder.toSet()), restored.order)
         assertEquals(setOf(MENU, EMOJI), restored.hidden)
+        assertTrue(restored.keepsDuringSuggestions(STICKER))
+    }
+
+    @Test
+    fun stickerCanStayEnabledOnTheShortcutBarWhileHiddenFromSuggestions() {
+        val settings = YboardSettings(toolbarShortcuts = ToolbarShortcuts(stickerWithSuggestions = false))
+        val restored = YboardSettings.fromJson(settings.toJson()).toolbarShortcuts
+        assertTrue(STICKER in restored.visible)
+        assertFalse(restored.keepsDuringSuggestions(STICKER))
+        assertTrue(restored.keepsDuringSuggestions(MIC))
     }
 }

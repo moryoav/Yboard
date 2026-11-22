@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.15.0
+
+- Added a setting to hide the sticker button while word suggestions are showing and keep it on the shortcut bar.
+
 ## 1.14.1
 
 - Fixed the key press effect getting stuck after opening the emoji picker and returning to the letter keys.

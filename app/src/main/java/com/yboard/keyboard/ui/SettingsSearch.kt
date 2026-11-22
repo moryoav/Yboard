@@ -85,6 +85,7 @@ object SettingsIndex {
         SettingEntry("Number hints", Screen.LAYOUT, "$LAYOUT › Keys", "numbers long press"),
         SettingEntry("Toolbar", Screen.LAYOUT, "$LAYOUT › Keys", "icons bar top"),
         SettingEntry("Toolbar shortcuts", Screen.TOOLBAR, LAYOUT, "icons order reorder hide show clipboard sticker emoji palette undo mic", null),
+        SettingEntry(STICKERS_WITH_SUGGESTIONS, Screen.TOOLBAR, "Toolbar shortcuts › While typing", "sticker icon hide completions predictions"),
         SettingEntry("Hide Android's switch-keyboard button", Screen.LAYOUT, "$LAYOUT › Keys", "gboard globe switch bar bottom"),
         SettingEntry("One-handed mode", Screen.LAYOUT, LAYOUT, "one hand left right thumb small יד אחת"),
         // Typing
