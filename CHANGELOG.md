@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.14.1
+
+- Fixed the key press effect getting stuck after opening the emoji picker and returning to the letter keys.
+
 ## 1.14.0
 
 - Added toolbar shortcut visibility and ordering in Layout & size, with a live preview and a reset button.

@@ -1069,6 +1069,7 @@ class KeyboardView(context: Context) : View(context) {
         pointers.values.forEach { cancelLongPress(it) }
         pointers.clear()
         pressedBoxes.clear()
+        effects.clear()
         handler.removeCallbacks(repeatRunnable)
         repeatKey = null
         repeatPointer = null
