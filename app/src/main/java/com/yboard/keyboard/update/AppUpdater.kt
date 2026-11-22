@@ -80,7 +80,7 @@ class AppUpdater(private val context: Context, network: Network? = null) {
         return UpdateRelease.parse(release, manifest)
     }
 
-    fun cachedFile(info: UpdateRelease) = File(File(context.cacheDir, "updates"), "${info.versionCode}.apk")
+    fun cachedFile(info: UpdateRelease) = File(cacheDirectory(context), "${info.versionCode}.apk")
 
     suspend fun download(info: UpdateRelease, progress: suspend (Int) -> Unit): File {
         val dest = cachedFile(info)
@@ -141,6 +141,18 @@ class AppUpdater(private val context: Context, network: Network? = null) {
     }
 
     companion object {
+        private fun cacheDirectory(context: Context) = File(context.cacheDir, "updates")
+
+        fun removeInstalledUpdateApks(context: Context) {
+            val installedCode = installedVersionCode(context)
+            cacheDirectory(context).listFiles()?.forEach { file ->
+                val cachedCode = file.nameWithoutExtension.toLongOrNull()
+                if (file.extension == "apk" && cachedCode != null && cachedCode in 1..installedCode && file.isFile) {
+                    file.delete()
+                }
+            }
+        }
+
         fun installedVersionCode(context: Context): Long =
             versionCode(context.packageManager.getPackageInfo(context.packageName, 0))
 

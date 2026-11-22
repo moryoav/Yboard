@@ -34,9 +34,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.lifecycleScope
 import com.yboard.keyboard.settings.Prefs
 import com.yboard.keyboard.ui.theme.YboardTheme
+import com.yboard.keyboard.update.AppUpdater
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -64,6 +67,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Prefs.init(this)
+        lifecycleScope.launch(Dispatchers.IO) {
+            AppUpdater.removeInstalledUpdateApks(applicationContext)
+        }
         enableEdgeToEdge()
         openRequest.value = intent?.getStringExtra(EXTRA_OPEN)
         intent?.removeExtra(EXTRA_OPEN)

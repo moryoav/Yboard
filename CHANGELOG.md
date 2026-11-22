@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.15.1
+
+- Removed cached update APKs for the installed version and older versions when opening Yboard.
+
 ## 1.15.0
 
 - Added a setting to hide the sticker button while word suggestions are showing and keep it on the shortcut bar.
