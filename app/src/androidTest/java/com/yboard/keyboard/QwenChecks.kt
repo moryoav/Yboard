@@ -47,16 +47,19 @@ internal object QwenChecks {
         val report = JSONArray()
         val fixtures = listOf(
             "automation " to "", "" to "hel", "See you" to "tom", "I will let you" to "", "I will be there" to "s",
-            "אני בדרך" to "", "תודה רבה" to ""
+            "אני בדרך" to "", "תודה רבה" to "",
         )
         for ((sentence, prefix) in fixtures) {
             val output = LocalQwen.predictBlocking(sentence, prefix)
             check(output.words.isNotEmpty()) { "Qwen returned no options for a synthetic fixture" }
+            check(output.candidates.size <= 3 && output.candidates.all { it.score.isFinite() && it.score < 0.0 })
+            check(output.candidates.zipWithNext().all { (a, b) -> a.score >= b.score })
             check(output.words.all { it.startsWith(prefix, true) })
             if (model == QwenModel.Variant.QWEN3 && sentence == "automation ") {
                 check(output.words.any { it == "is" || it == "and" }) { "A short message fragment produced filler instead of a continuation" }
             }
-            report.put(JSONObject().put("sentence", sentence).put("prefix", prefix).put("words", JSONArray(output.words)).put("ms", output.elapsedMs))
+            report.put(JSONObject().put("sentence", sentence).put("prefix", prefix).put("words", JSONArray(output.words))
+                .put("scores", JSONArray(output.candidates.map { it.score })).put("ms", output.elapsedMs))
         }
         val values = rank("I will be", listOf("there", "three", "the"))
         check(values[0] > values[1]) { "Sentence context did not prefer there over three" }

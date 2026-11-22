@@ -59,6 +59,7 @@ import com.yboard.keyboard.text.GlideRanking
 import com.yboard.keyboard.local.LocalQwen
 import com.yboard.keyboard.local.QwenModel
 import com.yboard.keyboard.text.Pt
+import com.yboard.keyboard.text.ScoredWord
 import com.yboard.keyboard.text.Suggester
 import com.yboard.keyboard.text.SwipeDecoder
 import com.yboard.keyboard.text.UserWords
@@ -533,6 +534,9 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
 
     private fun userWords() = UserWords.get(this, settings.activeLanguage)
 
+    private fun personalWords(language: String = settings.activeLanguage) =
+        if (settings.learnWords && learningAllowed) UserWords.get(this, language) else null
+
     private fun learn(word: String, amount: Int = 1) {
         if (!settings.learnWords || !learningAllowed) return
         if (word.any { it.isDigit() }) return
@@ -566,7 +570,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     private var localPending: Runnable? = null
     private var qwenInput: SentenceContext.Input? = null
     private var qwenRequested: SentenceContext.Input? = null
-    private var qwenWords: List<String> = emptyList()
+    private var qwenWords: List<ScoredWord> = emptyList()
     private var failedInput: SentenceContext.Input? = null
     private var retryAfter = 0L
     private var stripBefore: String? = null
@@ -663,14 +667,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
 
     private fun localCompletions(input: SentenceContext.Input): List<String> {
         if (qwenInput?.sameWord(input) != true) return emptyList()
-        val dictionary = dictionaries[settings.activeLanguage]
-        val user = if (settings.learnWords) userWords() else null
-        return qwenWords.mapNotNull { word ->
-            val normalized = Dictionary.normalize(word)
-            val spelling = dictionary?.spelling(normalized)
-                ?: user?.takeIf { it.isKnown(normalized) }?.spelling(normalized)
-            Suggester.modelCompletion(input.prefix, word, spelling)
-        }.distinct().take(3)
+        return Suggester.modelCompletions(input.prefix, qwenWords, dictionaries[settings.activeLanguage], personalWords())
     }
 
     private fun requestLocal(input: SentenceContext.Input) {
@@ -694,7 +691,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
                 if (!now.sameWord(input) || cursorInsideWord()) return@predict
                 result.onSuccess { output ->
                     qwenInput = input
-                    qwenWords = output.words
+                    qwenWords = output.candidates
                     PredictionStats.time("qwen", output.elapsedMs)
                     if (!renderLocal(now)) {
                         if (now.prefix != input.prefix) requestLocal(now)
@@ -1265,12 +1262,17 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         lastAutoCorrect = null
         val connection = target.connection
         if (Build.VERSION.SDK_INT >= 34 && target.editor.cursor != null &&
-            connection.replaceText(target.start, target.end, word, 1, null)) return
+            connection.replaceText(target.start, target.end, word, 1, null)) {
+            personalWords(target.language)?.learn(word, 2)
+            return
+        }
 
         connection.beginBatchEdit()
         try {
             if (connection.setSelection(target.start, target.end)) {
-                if (connection.getSelectedText(0)?.toString() != target.span.word || !connection.commitText(word, 1)) {
+                if (connection.getSelectedText(0)?.toString() == target.span.word && connection.commitText(word, 1)) {
+                    personalWords(target.language)?.learn(word, 2)
+                } else {
                     connection.setSelection(target.cursor, target.cursor)
                 }
             }
@@ -1315,7 +1317,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
                 return@rank
             }
             pendingSwipes.removeFirst()
-            val ranked = result.getOrNull()?.let { GlideRanking.rank(candidates, it) }.orEmpty()
+            val ranked = result.getOrNull()?.let { GlideRanking.rank(candidates, it, personalWords()) }.orEmpty()
             if (ranked.isEmpty()) {
                 if (swipePending) recognizeNextSwipe() else showModelNote("Model unavailable")
                 return@rank
@@ -1442,9 +1444,9 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
             ic.beginBatchEdit()
             ic.deleteSurroundingText(ls.word.length, 0)
             lastSwipe = null
-            commitSpacedSuggestion(ic, word, ls.word.length)
+            val committed = commitSpacedSuggestion(ic, word, ls.word.length)
             ic.endBatchEdit()
-            learnAccepted(word, ls.before, 2)
+            if (committed) learnAccepted(word, ls.before, 2)
             currentWord = ""
             updateSuggestions()
             return
@@ -1453,22 +1455,24 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         val before = contextBefore(w)
         ic.beginBatchEdit()
         ic.deleteSurroundingText(w.length, 0)
-        commitSpacedSuggestion(ic, word, w.length)
+        val committed = commitSpacedSuggestion(ic, word, w.length)
         ic.endBatchEdit()
         // Picking exactly what you typed teaches Yboard that word right away.
-        learnAccepted(word, before, 2)
+        if (committed) learnAccepted(word, before, 2)
         currentWord = ""
         if (shift == ShiftState.ON) setShift(ShiftState.OFF)
         updateSuggestions()
     }
 
-    private fun commitSpacedSuggestion(ic: InputConnection, word: String, replacedLength: Int = 0) {
+    private fun commitSpacedSuggestion(ic: InputConnection, word: String, replacedLength: Int = 0): Boolean {
         val inserted = "${capitalizePronoun(word)} "
         val start = selEnd - replacedLength
-        if (ic.commitText(inserted, 1) && start >= 0) {
+        val committed = ic.commitText(inserted, 1)
+        if (committed && start >= 0) {
             suggestionSpace = SuggestionSpace(start + inserted.length, inserted)
         }
         lastSpaceTime = 0
+        return committed
     }
 
     private fun replaceSuggestionSpace(ic: InputConnection, punctuation: String): Boolean {

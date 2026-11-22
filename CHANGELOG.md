@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.13.0
+
+- Added a small on-device boost for words you use often when ranking close glide matches and typed-word completions.
+
 ## 1.12.6
 
 - Enabled glide typing in browser address bars and other URL fields. Word suggestions, autocorrect, and learning stay off in these fields.

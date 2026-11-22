@@ -192,6 +192,21 @@ class Suggester(
             }
         }
 
+        /** Reorder model candidates for a typed prefix, preserving the model's order at a word boundary. */
+        internal fun modelCompletions(prefix: String, candidates: List<ScoredWord>, dictionary: Dictionary?, user: UserWords?): List<String> {
+            val usage = user?.takeIf { prefix.isNotEmpty() }
+            val matching = candidates.mapNotNull { (word, score) ->
+                val normalized = Dictionary.normalize(word)
+                val spelling = dictionary?.spelling(normalized)
+                    ?: user?.takeIf { it.isKnown(normalized) }?.spelling(normalized)
+                val completion = modelCompletion(prefix, word, spelling) ?: return@mapNotNull null
+                val bonus = usage?.let { UserWords.rankingBonus(it.count(normalized)) } ?: 0.0
+                ScoredWord(completion, score + bonus)
+            }
+            val ordered = if (usage != null) matching.sortedByDescending { it.score } else matching
+            return ordered.map { it.word }.distinct()
+        }
+
         /** Prefer established spellings and suppress mixed-case guesses unsupported by the prefix. */
         internal fun modelCompletion(prefix: String, word: String, spelling: String?): String? {
             if (!word.startsWith(prefix, ignoreCase = true)) return null

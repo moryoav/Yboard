@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import android.os.Handler
 import android.os.Looper
 import org.json.JSONObject
+import kotlin.math.ln1p
 
 /**
  * Words Yboard learns from you (names, slang, words missing from the dictionary), plus how
@@ -139,6 +140,10 @@ class UserWords private constructor(private val sp: SharedPreferences?, private 
         }
 
         fun learnedFreq(count: Int): Int = (110 + count * 15).coerceAtMost(240)
+
+        /** A small log-score adjustment with diminishing returns for repeated use. */
+        internal fun rankingBonus(count: Int): Double =
+            (0.10 * ln1p(count.coerceAtLeast(0).toDouble())).coerceAtMost(0.25)
 
         fun get(context: Context, language: String): UserWords = synchronized(cache) {
             cache.getOrPut(language) {

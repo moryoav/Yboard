@@ -1,6 +1,7 @@
 package com.yboard.keyboard
 
 import android.app.Instrumentation
+import android.content.Context
 import android.os.SystemClock
 import android.text.InputType
 import android.view.MotionEvent
@@ -15,6 +16,7 @@ import com.yboard.keyboard.settings.Prefs
 import com.yboard.keyboard.text.Pt
 import com.yboard.keyboard.text.SentenceContext
 import com.yboard.keyboard.text.Suggester
+import com.yboard.keyboard.text.UserWords
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -241,10 +243,57 @@ internal class PredictionImeChecks(private val instrumentation: Instrumentation)
             report.put("passwordKeyboard", if (ownPassword) "Yboard guarded" else "OnePlus protected keyboard")
             checkWordReplacement()
             checkReportedPredictions()
+            if (QwenModel.selected == QwenModel.Variant.QWEN3 && checkPersonalCompletions()) {
+                report.put("personalCompletion", "Two taps reordered a close match, saved the count, and respected Learn my words")
+            }
             launch("Finished ")
             report.put("passed", "prefix completion, consecutive taps, punctuation after suggestions, literal spaces at a moved cursor, full sentence, model-ranked swipes, ordered glide queue, cursor and tap cancellation, spacing after completed glides, standalone I, address bar glide, private/password guards, clipped where glide, word-end glide alternatives, edge completion capitalization and next words after a space")
             return report.toString()
         } finally { onMain { Prefs.update { saved } } }
+    }
+
+    private fun checkPersonalCompletions(): Boolean {
+        val context = instrumentation.targetContext
+        val user = UserWords.get(context, "en")
+        val words = listOf("box", "books")
+        val prefs = Prefs.current
+        if (prefs.myWords.any { it.lowercase() in words }) return false
+        val original = mutableMapOf<String, Pair<String?, Int>>()
+        onMain {
+            for (word in words) {
+                original[word] = user.spelling(word) to user.count(word)
+                user.forget(word)
+            }
+            Prefs.update { it.copy(learnWords = true) }
+        }
+        val prefix = "I will bring the bo"
+        val initial = listOf("books", "book", "box")
+        try {
+            repeat(2) {
+                launch(prefix)
+                await("original autocomplete order") { slots() == initial }
+                onMain { ime.onSuggestion(slots().indexOf("box")) }
+                await("accepted familiar completion") { text() == "I will bring the box " }
+            }
+            launch(prefix)
+            await("learned completion moved before a close match") { slots() == listOf("box", "book", "books") }
+            val persisted = context.getSharedPreferences("yboard_words", Context.MODE_PRIVATE)
+            await("learned count persisted") {
+                JSONObject(persisted.getString("en", "{}").orEmpty()).optJSONArray("box")?.optInt(1) == 4
+            }
+            onMain { Prefs.update { it.copy(learnWords = false) } }
+            await("disabling learning restores the original order") { slots() == initial }
+            return true
+        } finally {
+            onMain {
+                for ((word, entry) in original) {
+                    user.forget(word)
+                    val (spelling, count) = entry
+                    if (spelling != null && count > 0) user.learn(spelling, count)
+                }
+                Prefs.update { prefs }
+            }
+        }
     }
 
     private fun checkAddressBarGlide() {
@@ -291,7 +340,8 @@ internal class PredictionImeChecks(private val instrumentation: Instrumentation)
         val wordEnd = sentence.length + "where".length
         onMain { ime.currentInputConnection.setSelection(wordEnd, wordEnd) }
         await("original glide alternatives at the terminal word end") {
-            text() == sentence + "where" && field("replacement").get(ime) != null && slots().contains("edge")
+            field("selEnd").getInt(ime) == wordEnd && text() == sentence + "where" &&
+                field("replacement").get(ime) != null && slots().contains("edge")
         }
         onMain { ime.onSuggestion(slots().indexOf("edge")) }
         await("terminal replacement preserves surrounding text") { draft() == sentence + "edge" }

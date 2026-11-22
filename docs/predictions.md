@@ -15,8 +15,11 @@ typing. Removed models can be downloaded again from the same screen.
 While typing, the selected model supplies and ranks word suggestions. The dictionary
 can supply their established spelling. Explicit text shortcuts and email helper buttons
 remain available.
-Old learned vocabulary can still supply names to the gesture lexicon; it does not
-supply prediction scores. Historical cloud prediction usage remains readable.
+With **Learn my words** enabled, Yboard gives frequently used words a small,
+capped boost among the model's typed-prefix completions and plausible glide
+matches. Learned vocabulary can also supply names to the gesture lexicon.
+Explicitly choosing a suggestion counts more than keeping an automatic glide
+guess. Historical cloud prediction usage remains readable.
 
 ## Context and latency
 

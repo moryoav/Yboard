@@ -15,6 +15,7 @@ namespace {
 std::atomic<int64_t> generation{0};
 std::once_flag initialized;
 constexpr int BEAM = 4;
+constexpr int PREDICTION_LIMIT = 3;
 constexpr int MAX_CANDIDATES = 32;
 
 // JNI modified UTF-8 is not UTF-8: convert surrogate pairs before passing editor text to the model.
@@ -230,7 +231,7 @@ struct Engine {
     }
 
     struct Node { std::string raw; double score; int seq; int parent; llama_token token; };
-    std::vector<std::string> predict(const std::string & text, const std::string & typed, int64_t ticket) {
+    std::vector<std::pair<std::string, double>> predict(const std::string & text, const std::string & typed, int64_t ticket) {
         prepare(text, ticket);
         const std::string prefix = folded(typed);
         const bool need_space = !text.empty();
@@ -296,20 +297,19 @@ struct Engine {
             }
             llama_batch_free(batch);
             live = std::move(next);
-            if (completed.size() >= 3) {
+            if (completed.size() >= PREDICTION_LIMIT) {
                 std::vector<double> scores;
                 for (const auto & item : completed) scores.push_back(item.second.second);
                 std::sort(scores.begin(), scores.end(), std::greater<double>());
-                if (live.front().score < scores[2]) break;
+                if (live.front().score < scores[PREDICTION_LIMIT - 1]) break;
             }
         }
         branches_clear(); check();
         std::vector<std::pair<std::string, double>> ranked;
         for (const auto & item : completed) ranked.push_back(item.second);
         std::sort(ranked.begin(), ranked.end(), [](const auto & a, const auto & b) { return a.second > b.second; });
-        std::vector<std::string> result;
-        for (size_t i = 0; i < std::min<size_t>(3, ranked.size()); ++i) result.push_back(ranked[i].first);
-        return result;
+        if (ranked.size() > PREDICTION_LIMIT) ranked.resize(PREDICTION_LIMIT);
+        return ranked;
     }
 
     std::vector<double> score(const std::string & text, const std::vector<std::string> & words, int64_t ticket) {
@@ -371,11 +371,20 @@ extern "C" JNIEXPORT void JNICALL Java_com_yboard_keyboard_local_QwenNative_clea
 extern "C" JNIEXPORT void JNICALL Java_com_yboard_keyboard_local_QwenNative_prepare(JNIEnv * env, jobject, jlong handle, jstring text, jlong ticket) {
     try { engine(handle)->prepare(utf8(env, text), ticket); } catch (const std::exception & error) { if (handle) engine(handle)->reset(); fail(env, error); }
 }
-extern "C" JNIEXPORT jobjectArray JNICALL Java_com_yboard_keyboard_local_QwenNative_predict(JNIEnv * env, jobject, jlong handle, jstring text, jstring prefix, jlong ticket) {
+extern "C" JNIEXPORT jobjectArray JNICALL Java_com_yboard_keyboard_local_QwenNative_predict(JNIEnv * env, jobject, jlong handle, jstring text, jstring prefix, jlong ticket, jdoubleArray scores) {
     try {
+        if (env->GetArrayLength(scores) < PREDICTION_LIMIT) throw std::invalid_argument("Prediction score buffer too small");
         auto words = engine(handle)->predict(utf8(env, text), utf8(env, prefix), ticket);
         auto result = env->NewObjectArray(words.size(), env->FindClass("java/lang/String"), nullptr);
-        for (size_t i = 0; i < words.size(); ++i) { auto value = env->NewStringUTF(words[i].c_str()); env->SetObjectArrayElement(result, i, value); env->DeleteLocalRef(value); }
+        jdouble probabilities[PREDICTION_LIMIT];
+        for (size_t i = 0; i < words.size(); ++i) {
+            const auto & [word, probability] = words[i];
+            auto value = env->NewStringUTF(word.c_str());
+            env->SetObjectArrayElement(result, i, value);
+            env->DeleteLocalRef(value);
+            probabilities[i] = probability;
+        }
+        env->SetDoubleArrayRegion(scores, 0, words.size(), probabilities);
         return result;
     } catch (const std::exception & error) { if (handle) engine(handle)->reset(); fail(env, error); return nullptr; }
 }

@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import com.yboard.keyboard.text.ScoredWord
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.concurrent.CancellationException
@@ -19,7 +20,10 @@ object LocalQwen {
         val error: String? = null,
         val model: QwenModel.Variant? = null,
     )
-    data class Result(val words: List<String>, val elapsedMs: Long)
+    data class Result(val candidates: List<ScoredWord>, val elapsedMs: Long) {
+        val words: List<String> get() = candidates.map { it.word }
+    }
+    private const val PREDICTION_LIMIT = 3
     private val mutable = MutableStateFlow(Status())
     val status = mutable.asStateFlow()
     private val main = Handler(Looper.getMainLooper())
@@ -115,8 +119,10 @@ object LocalQwen {
             val result = runCatching {
                 val start = SystemClock.elapsedRealtime()
                 ensureLoaded(model)
-                val words = QwenNative.predict(handle, context, prefix, id).toList()
-                Result(words, SystemClock.elapsedRealtime() - start)
+                val scores = DoubleArray(PREDICTION_LIMIT)
+                val words = QwenNative.predict(handle, context, prefix, id, scores)
+                val candidates = words.mapIndexed { index, word -> ScoredWord(word, scores[index]) }
+                Result(candidates, SystemClock.elapsedRealtime() - start)
             }
             main.post {
                 if (id == ticket) {

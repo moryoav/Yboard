@@ -8,6 +8,7 @@ internal object QwenNative {
     external fun cancel(): Long
     external fun clear(handle: Long)
     external fun prepare(handle: Long, context: String, generation: Long)
-    external fun predict(handle: Long, context: String, prefix: String, generation: Long): Array<String>
+    /** Writes each returned word's log probability at the matching index in [scores]. */
+    external fun predict(handle: Long, context: String, prefix: String, generation: Long, scores: DoubleArray): Array<String>
     external fun score(handle: Long, context: String, words: Array<String>, generation: Long): DoubleArray
 }
