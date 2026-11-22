@@ -131,6 +131,7 @@ object LocalCommands {
      * "new", "question" ... so command words aren't flashed in the text field while you talk.
      */
     fun mightBeCommand(spoken: String): Boolean {
+        if (quotedPunctuation(spoken)) return false
         val n = normalize(spoken)
         if (n.isEmpty()) return false
         val bare = withoutInsertVerb(n)
@@ -189,6 +190,7 @@ object LocalCommands {
      * that is still at the end of the text (what "delete that" removes), or null.
      */
     fun match(spoken: String, before: String, lastPhrase: String?): Match? {
+        if (quotedPunctuation(spoken)) return null
         val stripped = normalize(spoken)
         val raw = clean(spoken)
         if (stripped.isEmpty() && raw.isEmpty()) return null
@@ -263,6 +265,7 @@ object LocalCommands {
      * longer command starts with ("delete that" / "delete that word") waits a little more.
      */
     fun quickEndFrames(spoken: String): Int {
+        if (quotedPunctuation(spoken)) return 0
         val stripped = normalize(spoken)
         val raw = clean(spoken)
         val forms = listOf(stripped, raw, withoutInsertVerb(stripped)).filter { it.isNotEmpty() }.distinct()
@@ -357,31 +360,99 @@ object LocalCommands {
         return before.substring(i)
     }
 
-    // Spoken punctuation inside a longer phrase: "hi question mark how are you" -> "hi? how are you".
-    private val inline = listOf(
-        "question mark" to "?", "exclamation mark" to "!", "exclamation point" to "!", "full stop" to ".",
-        "semicolon" to ";", "comma" to ",", "new paragraph" to "\n\n", "new line" to "\n",
-        "סימן שאלה" to "?", "סימן קריאה" to "!", "נקודתיים" to ":", "פסיק" to ",", "פסקה חדשה" to "\n\n",
-        "שורה חדשה" to "\n",
+    private val standaloneMarks = setOf("dot", "dash", "hyphen", "at sign", "מקף")
+    private val inlineMarks = punctuation.filterKeys { it !in standaloneMarks } +
+        mapOf("new paragraph" to "\n\n", "new line" to "\n", "פסקה חדשה" to "\n\n", "שורה חדשה" to "\n")
+    private val spokenMark = Regex(
+        """([ \t]*(?:[.,?!;:…]+[ \t]+)?)(?<![\p{L}\p{M}\p{N}'’\p{Pd}])""" +
+            inlineMarks.keys.joinToString("|", "(", ")") { Regex.escape(it) } +
+            """(?![\p{L}\p{M}\p{N}\p{Pd}]|['’][\p{L}\p{M}])([.,?!;:…]*)""",
+        RegexOption.IGNORE_CASE,
     )
-    // Common words that only mean punctuation at the very end of a phrase ("the period of" stays).
-    private val endOnly = listOf("period" to ".", "colon" to ":", "נקודה" to ".")
+    private val wordBeforeMark = Regex("""[\p{L}\p{M}]+(?:['’][\p{L}\p{M}]+)?$""")
+    private val openQuotes = "\"“‘'«"
+    private val closeQuotes = "\"”’'»"
+    private val sentenceInitial = Regex("""^[ \t\r\n]*["“‘]?(?<letter>[a-z])""")
+    private val literalMarkIntroductions = setOf(
+        "a", "an", "the", "this", "that", "each", "every", "any", "another", "your", "my", "our", "their",
+        "his", "her", "its", "which", "what", "missing", "extra", "double",
+        "word", "called", "named", "say", "saying", "said", "type", "typed", "write", "wrote",
+        "המילה", "כל", "אותה", "איזו",
+    )
+    private val periodModifiers = setOf(
+        "trial", "grace", "notice", "billing", "waiting", "probation", "probationary", "incubation",
+        "recovery", "transition", "reporting", "pay", "school", "class", "menstrual",
+        "long", "short", "brief", "extended", "entire", "whole", "same", "time",
+    )
+    private val numberedPeriod = Regex(
+        """\b(?:the|a|this|that|my|your|his|her|our|their|its)\s+(?:first|second|third|fourth|last|final|\d+(?:st|nd|rd|th)?)$""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val periodContinuation = Regex(
+        """^\s*[,;:]?\s*(?:of|for|during|between|before|after|under|in|at|with|without|since|until|which|that|when|where|is|was|lasts?|ended|ends|starts?|begins?)\b""",
+        RegexOption.IGNORE_CASE,
+    )
+    // The following words can start a new thought even if the transcript supplies no punctuation.
+    private val afterSpokenPeriod = Regex(
+        """^(?:i|you|he|she|it|we|they|there|this|these|those|the|a|an|my|your|our|their|please|thanks?|see|let['’]s|let me|""" +
+            """call|tell|send|remember|have|take|keep|make|come|also|now|next|then|and then|but|however|if|today|tomorrow|later|""" +
+            """what|who|why|how|can you|could you|are you|do you|good (?:morning|night)|""" +
+            """אני|אתה|את|אנחנו|הוא|היא|הם|הן|זה|זאת|תודה|בבקשה|עכשיו|אבל|ואז|נתראה|להתראות|אחר כך)\b""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val hebrewPeriodContinuation = Regex("""^\s*[,;:]?\s*(?:אחת|קטנה|גדולה|חשובה|של|על)\b""")
+    private val capitalizedSentenceStart = Regex("""^[A-Z][a-z]+\s+\p{L}""")
+
+    private fun quotedPunctuation(spoken: String): Boolean {
+        val t = spoken.trim().trimEnd('.', ',', '?', '!', ';', ':', '…')
+        return t.length > 2 && t.first() in openQuotes && t.last() in closeQuotes && clean(t) in punctuation
+    }
+
+    private fun isSpokenMark(text: String, match: MatchResult, word: String): Boolean {
+        val start = match.groups[2]!!.range.first
+        val end = match.groups[2]!!.range.last + 1
+        val before = text.substring(0, start).trimEnd()
+        val after = text.substring(end)
+        if (before.lastOrNull()?.let { it in openQuotes } == true) return false
+
+        val separator = match.groupValues[1]
+        val left = before.trimEnd { it.isWhitespace() || it in ".,?!;:…" }
+        val previous = wordBeforeMark.find(left)?.value?.lowercase().orEmpty()
+        val separateSentence = separator.any { it in ".?!…" }
+        if (!separateSentence && previous in literalMarkIntroductions) return false
+        if (word != "period" && word != "נקודה") return true
+        if (word == "period" && !separateSentence && (previous in periodModifiers || numberedPeriod.containsMatchIn(left))) return false
+        if (word == "period" && periodContinuation.containsMatchIn(after)) return false
+        if (word == "נקודה" && hebrewPeriodContinuation.containsMatchIn(after)) return false
+
+        val next = text.substring(match.range.last + 1)
+        val following = next.trimStart()
+        return separateSentence || match.groupValues[3].any { it in ".?!…" } ||
+            following.isEmpty() || next.trimStart(' ', '\t').firstOrNull()?.let { it in "\r\n" } == true ||
+            next.firstOrNull()?.let { it in closeQuotes } == true ||
+            afterSpokenPeriod.containsMatchIn(following) || capitalizedSentenceStart.containsMatchIn(following)
+    }
 
     fun spokenPunctuation(text: String): String {
-        var t = text
-        for ((word, symbol) in inline) {
-            val sentenceStart = if (symbol.length == 1 && symbol[0] in ".?!") "(?:[ \\t]+([a-z]))?" else ""
-            val re = Regex("[\\s,.;:]*(?<!\\p{L})" + Regex.escape(word) + "(?!\\p{L})[.,!?;:]*" + sentenceStart,
-                RegexOption.IGNORE_CASE)
-            t = t.replace(re) { match ->
-                if (symbol.endsWith("\n")) symbol
-                else "$symbol ${match.groupValues.getOrNull(1).orEmpty().uppercase()}"
+        var copied = 0
+        var capitalize = false
+        val resolved = buildString {
+            fun appendWords(words: String) {
+                val letter = if (capitalize) sentenceInitial.find(words)?.groups?.get("letter") else null
+                append(if (letter == null) words else words.replaceRange(letter.range, letter.value.uppercase()))
             }
+            for (mark in spokenMark.findAll(text)) {
+                val word = mark.groupValues[2].lowercase()
+                if (!isSpokenMark(text, mark, word)) continue
+                val symbol = inlineMarks.getValue(word)
+                appendWords(text.substring(copied, mark.range.first))
+                append(symbol)
+                copied = mark.range.last + 1
+                if (text.getOrNull(copied)?.isLetterOrDigit() == true && !symbol.endsWith('\n')) append(' ')
+                capitalize = symbol.length == 1 && symbol[0] in ".?!…"
+            }
+            appendWords(text.substring(copied))
         }
-        for ((word, symbol) in endOnly) {
-            val re = Regex("[\\s,.;:]*(?<!\\p{L})" + Regex.escape(word) + "[.,!?;:]*\\s*$", RegexOption.IGNORE_CASE)
-            t = t.replace(re, symbol)
-        }
-        return t.replace(Regex(" +\n"), "\n").replace(Regex("\n +"), "\n").replace(Regex(" {2,}"), " ").trim(' ')
+        return resolved.replace(Regex(" +\n"), "\n").replace(Regex("\n +"), "\n").replace(Regex(" {2,}"), " ").trim(' ')
     }
 }

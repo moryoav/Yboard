@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.12.3
+
+- Recognized spoken periods between sentences during continuous dictation and preserved common literal uses such as “trial period”.
+- Improved spoken punctuation in English and Hebrew, including commas, colons, question marks, exclamation marks, and ellipses.
+
 ## 1.12.2
 
 - Added automatic spacing when typing letters after a glided word. Punctuation stays attached to the preceding word.

@@ -153,6 +153,23 @@ object VoiceRegression {
             check(f.text() == "I bought milk, bread, and eggs. Before I left,")
         })
         scenario({ f ->
+            f.audio(); f.voice.onDelta("one", "I'll be there at six period see you soon.")
+            check(f.text() == "I'll be there at six. See you soon." && f.pauseHints.last() == 0) { f.text() }
+            f.phrase(); f.finish("one", "I'll be there at six. Period. See you soon.")
+            f.phrase(); f.finish("two", "There is a 30-day trial period.")
+            check(f.text() == "I'll be there at six. See you soon. There is a 30-day trial period.") { f.text() }
+        })
+        scenario({ f ->
+            f.phrase()
+            f.results.add("הנה הרשימה נקודתיים לחם פסיק חלב נקודה אתה מגיע סימן שאלה בטח סימן קריאה")
+            f.voice.onClosed("offline", 0); f.clock.advance()
+            check(f.fileCalls == 1 && f.text() == "הנה הרשימה: לחם, חלב. אתה מגיע? בטח!") { f.text() }
+        })
+        scenario({ f ->
+            f.phrase(); f.finish("one", "I'll be there period. See you soon.")
+            check(f.text() == "I'll be there period. See you soon.")
+        }, smart = false)
+        scenario({ f ->
             f.phrase(); f.results.add("אם ירד גשם , אשאר בבית .")
             f.voice.onClosed("offline", 0); f.clock.advance()
             check(f.fileCalls == 1 && f.text() == "אם ירד גשם, אשאר בבית.")

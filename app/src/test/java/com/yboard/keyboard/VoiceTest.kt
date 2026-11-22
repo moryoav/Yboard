@@ -267,6 +267,64 @@ class VoiceTest {
     }
 
     @Test
+    fun spokenPeriodsWorkInsideContinuousDictation() {
+        val examples = listOf(
+            "I'll be there at six period see you soon." to "I'll be there at six. See you soon.",
+            "I'll call you, period. See you soon." to "I'll call you. See you soon.",
+            "I'll call you. Period. See you soon." to "I'll call you. See you soon.",
+            "Have a nice day period" to "Have a nice day.",
+            "We can stop now period I will email you period" to "We can stop now. I will email you.",
+            "אני מגיע בשש נקודה נתראה בקרוב." to "אני מגיע בשש. נתראה בקרוב.",
+        )
+        for ((heard, expected) in examples) {
+            assertEquals(heard, expected, LocalCommands.spokenPunctuation(heard))
+            assertEquals(heard, expected, LocalCommands.preview(heard, smart = true))
+        }
+    }
+
+    @Test
+    fun literalPunctuationNamesStayInTheText() {
+        val examples = listOf(
+            "There is a 30-day trial period.",
+            "It was the first period. We missed it.",
+            "What period are you studying?",
+            "We reviewed the entire period",
+            "This period of time was too short.",
+            "It was a long period, which ended yesterday.",
+            "I said “period.”",
+            "I forgot the question mark.",
+            "A comma goes here and a colon goes there.",
+            "The train came to a full stop.",
+            "Use comma-separated values.",
+            "זו נקודה חשובה.",
+        )
+        for (heard in examples) assertEquals(heard, heard, LocalCommands.spokenPunctuation(heard))
+        assertEquals(null, LocalCommands.match("“period.”", "I said", null))
+        assertEquals("“period.”", LocalCommands.preview("“period.”", smart = true))
+    }
+
+    @Test
+    fun otherNamedMarksAndLayoutWorkDuringDictation() {
+        val examples = listOf(
+            "Bring these things colon milk comma eggs comma and bread period" to "Bring these things: milk, eggs, and bread.",
+            "I waited semicolon we left." to "I waited; we left.",
+            "Are you coming? Question mark. good." to "Are you coming? Good.",
+            "He asked, “Are you coming question mark”" to "He asked, “Are you coming?”",
+            "Yes exclamation point then we can go full stop" to "Yes! Then we can go.",
+            "Well ellipsis I guess so." to "Well… I guess so.",
+            "first line new line second line new paragraph third line" to "first line\nsecond line\n\nthird line",
+            "הנה הרשימה נקודתיים לחם פסיק חלב נקודה" to "הנה הרשימה: לחם, חלב.",
+            "אתה מגיע סימן שאלה בטח סימן קריאה" to "אתה מגיע? בטח!",
+            "רגע שלוש נקודות אני בדרך" to "רגע… אני בדרך",
+        )
+        for ((heard, expected) in examples) assertEquals(heard, expected, LocalCommands.spokenPunctuation(heard))
+        val standalone = mapOf("dot" to ".", "dash" to " -", "hyphen" to "-", "at sign" to "@", "מקף" to "-")
+        for ((heard, expected) in standalone) {
+            assertEquals(heard, expected, LocalCommands.match(heard, "text", null)?.edit?.insert)
+        }
+    }
+
+    @Test
     fun readsTheAiAnswer() {
         val reply = JSONObject(
             """{"id":"r1","status":"completed","output":[{"type":"reasoning","summary":[]},
