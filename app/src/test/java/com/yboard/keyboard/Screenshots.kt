@@ -24,7 +24,7 @@ import com.yboard.keyboard.keyboard.Layouts
 import com.yboard.keyboard.keyboard.Mode
 import com.yboard.keyboard.keyboard.ShiftState
 import com.yboard.keyboard.keyboard.ThemesPanel
-import com.yboard.keyboard.keyboard.ToolbarView
+import com.yboard.keyboard.settings.ToolbarShortcut
 import com.yboard.keyboard.settings.KeyStyle
 import com.yboard.keyboard.settings.OneHanded
 import com.yboard.keyboard.settings.ThemePresets
@@ -179,7 +179,7 @@ class AppScreensDark {
     @Test fun homeDark() = paparazzi.snapshot { Wrap { HomeScreen(YboardSettings(theme = ThemePresets.aurora), onOpen = {}) } }
 
     @Test fun layoutDark() = paparazzi.snapshot {
-        Wrap { LayoutScreen(YboardSettings(numberRow = true, oneHanded = OneHanded.RIGHT), onBack = {}) }
+        Wrap { LayoutScreen(YboardSettings(numberRow = true, oneHanded = OneHanded.RIGHT), onBack = {}, onToolbar = {}) }
     }
 }
 
@@ -196,7 +196,7 @@ class KeyboardShots {
         mode: Mode = Mode.LETTERS,
         shift: ShiftState = ShiftState.OFF,
         enter: EnterType = EnterType.NEWLINE,
-        panel: ((KeyboardRootView) -> Pair<View, ToolbarView.Action?>)? = null,
+        panel: ((KeyboardRootView) -> Pair<View, ToolbarShortcut?>)? = null,
     ): View {
         val ctx = paparazzi.context
         val density = ctx.resources.displayMetrics.density
@@ -262,13 +262,13 @@ class KeyboardShots {
     @Test fun borderless() = paparazzi.snapshot(board(YboardSettings(theme = ThemePresets.minimal.copy(keyStyle = KeyStyle.FLAT))))
 
     @Test fun themesPanel() = paparazzi.snapshot(board(YboardSettings(theme = ThemePresets.glass)) { r ->
-        ThemesPanel(r.context, {}, {}, {}, {}) to ToolbarView.Action.THEMES
+        ThemesPanel(r.context, {}, {}, {}, {}) to ToolbarShortcut.THEMES
     })
 
     @Test fun clipboardPanel() = paparazzi.snapshot(board(YboardSettings(theme = ThemePresets.dark)) { r ->
         ClipboardPanel(r.context, {}, {}, {}).apply {
             setItems(listOf("See you at 8 tonight!", "https://example.com/recipe", "שלום, מה שלומך?"))
-        } to ToolbarView.Action.CLIPBOARD
+        } to ToolbarShortcut.CLIPBOARD
     })
 
     @Test fun emojiPanel() = paparazzi.snapshot(board(YboardSettings(theme = ThemePresets.aurora)) { r ->
@@ -276,6 +276,6 @@ class KeyboardShots {
     })
 
     @Test fun editPanel() = paparazzi.snapshot(board(YboardSettings(theme = ThemePresets.light)) { r ->
-        GridPadView.editPanel(r.context).apply { toggled = setOf(GridPadView.SELECT) } to ToolbarView.Action.EDIT
+        GridPadView.editPanel(r.context).apply { toggled = setOf(GridPadView.SELECT) } to ToolbarShortcut.EDIT
     })
 }

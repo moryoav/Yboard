@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.14.0
+
+- Added toolbar shortcut visibility and ordering in Layout & size, with a live preview and a reset button.
+- Added an optional emoji picker shortcut above the keys.
+
 ## 1.13.0
 
 - Added a small on-device boost for words you use often when ranking close glide matches and typed-word completions.

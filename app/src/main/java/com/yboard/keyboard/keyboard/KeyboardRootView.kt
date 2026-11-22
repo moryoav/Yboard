@@ -10,6 +10,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import com.yboard.keyboard.settings.ToolbarShortcut
 import com.yboard.keyboard.settings.YboardSettings
 import kotlin.math.roundToInt
 
@@ -189,7 +190,7 @@ class KeyboardRootView(context: Context, private val preview: Boolean) : LinearL
         }
     }
 
-    fun showPanel(view: View, action: ToolbarView.Action?) {
+    fun showPanel(view: View, action: ToolbarShortcut?) {
         closePanel()
         panelView = view
         (view as? ThemedPanel)?.applyTheme(settings)

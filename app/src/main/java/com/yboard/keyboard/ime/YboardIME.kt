@@ -49,6 +49,7 @@ import com.yboard.keyboard.keyboard.ThemesPanel
 import com.yboard.keyboard.keyboard.ToolbarView
 import com.yboard.keyboard.settings.OneHanded
 import com.yboard.keyboard.settings.Prefs
+import com.yboard.keyboard.settings.ToolbarShortcut
 import com.yboard.keyboard.settings.YboardSettings
 import com.yboard.keyboard.text.Dictionary
 import com.yboard.keyboard.text.EmojiSearch
@@ -1508,36 +1509,33 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         }
     }
 
-    override fun onToolbar(action: ToolbarView.Action) {
+    override fun onToolbar(action: ToolbarShortcut) {
         val r = root ?: return
         if (swipePending) cancelAiPredictions()
-        if (action != ToolbarView.Action.STICKER) closeSticker()
-        if (action == ToolbarView.Action.MIC) {
+        if (action != ToolbarShortcut.STICKER) closeSticker()
+        if (action == ToolbarShortcut.MIC) {
             toggleVoice()
             return
         }
         endVoice()
         if (r.toolbar.active == action) {
-            if (action == ToolbarView.Action.STICKER) closeSticker()
+            if (action == ToolbarShortcut.STICKER) closeSticker()
             r.closePanel()
             return
         }
         when (action) {
-            ToolbarView.Action.MENU -> openApp()
-            ToolbarView.Action.UNDO -> {
+            ToolbarShortcut.MENU -> openApp()
+            ToolbarShortcut.UNDO -> {
                 r.closePanel()
                 sendKey(KeyEvent.KEYCODE_Z, false, ctrl = true)
             }
-            ToolbarView.Action.CLIPBOARD -> openClipboard()
-            ToolbarView.Action.THEMES -> openThemes()
-            ToolbarView.Action.EDIT -> openEditing()
-            ToolbarView.Action.SPRINKLE -> { r.closePanel(); sprinkleEmojis() }
-            ToolbarView.Action.STICKER -> openSticker()
-            ToolbarView.Action.ONE_HANDED -> {
-                r.closePanel()
-                Prefs.update { it.copy(oneHanded = if (it.oneHanded == OneHanded.OFF) OneHanded.RIGHT else OneHanded.OFF) }
-            }
-            ToolbarView.Action.MIC -> Unit
+            ToolbarShortcut.CLIPBOARD -> openClipboard()
+            ToolbarShortcut.THEMES -> openThemes()
+            ToolbarShortcut.EDIT -> openEditing()
+            ToolbarShortcut.SPRINKLE -> { r.closePanel(); sprinkleEmojis() }
+            ToolbarShortcut.EMOJI -> openEmoji()
+            ToolbarShortcut.STICKER -> openSticker()
+            ToolbarShortcut.MIC -> Unit
         }
     }
 
@@ -1575,7 +1573,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
             onClose = { closeSticker(); root?.closePanel(); updateSuggestions() },
             onRecreate = { createSticker() }, onSend = { sendSticker() })
         stickerPanel = panel
-        root?.showPanel(panel, ToolbarView.Action.STICKER)
+        root?.showPanel(panel, ToolbarShortcut.STICKER)
         createSticker()
     }
 
@@ -1853,7 +1851,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
             onSpace = { handleSpace() },
             onClose = { r.closePanel() },
             onSearch = { openEmojiSearch() },
-        ), null)
+        ), ToolbarShortcut.EMOJI.takeIf { it !in r.settings.toolbarShortcuts.hidden })
         clearStrip()
     }
 
@@ -1922,7 +1920,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
             onClear = { clips.clear(); Prefs.saveClips(clips); (r.panelView as? ClipboardPanel)?.setItems(clips) },
         )
         panel.setItems(clips)
-        r.showPanel(panel, ToolbarView.Action.CLIPBOARD)
+        r.showPanel(panel, ToolbarShortcut.CLIPBOARD)
     }
 
     private fun openThemes() {
@@ -1933,7 +1931,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
             onBgOpacity = { v -> Prefs.updateTheme { it.copy(bgOpacity = v) } },
             onKeyOpacity = { v -> Prefs.updateTheme { it.copy(keyOpacity = v) } },
             onMore = { openApp() },
-        ), ToolbarView.Action.THEMES)
+        ), ToolbarShortcut.THEMES)
     }
 
     private fun openEditing() {
@@ -1941,7 +1939,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         val pad = GridPadView.editPanel(this)
         pad.toggled = if (selecting) setOf(GridPadView.SELECT) else emptySet()
         pad.onCell = { id -> onEditAction(id, pad) }
-        r.showPanel(pad, ToolbarView.Action.EDIT)
+        r.showPanel(pad, ToolbarShortcut.EDIT)
     }
 
     private fun onEditAction(id: Int, pad: GridPadView) {

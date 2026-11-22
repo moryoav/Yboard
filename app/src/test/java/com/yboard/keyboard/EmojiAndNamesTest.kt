@@ -116,9 +116,8 @@ class EmojiAndNamesTest {
         assertEquals(listOf("Yoav" to "יואבי"), p)
         assertNull(MyWords.withPair(p, "Yoav", "Yoavi"))   // same language: not a pair
         assertTrue(MyWords.withoutPair(p, "Yoav").isEmpty())
-        val s = YboardSettings(myWords = listOf("Yoav"), myWordPairs = p, emojiSprinkle = false)
+        val s = YboardSettings(myWords = listOf("Yoav"), myWordPairs = p)
         assertEquals(s, YboardSettings.fromJson(s.toJson()))
-        assertTrue(YboardSettings().emojiSprinkle)
     }
 
     @Test

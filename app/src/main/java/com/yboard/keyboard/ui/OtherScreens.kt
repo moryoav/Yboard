@@ -31,11 +31,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.yboard.keyboard.settings.OneHanded
 import com.yboard.keyboard.settings.Prefs
+import com.yboard.keyboard.settings.ToolbarShortcut
 import com.yboard.keyboard.settings.YboardSettings
 import kotlin.math.roundToInt
 
 @Composable
-fun LayoutScreen(settings: YboardSettings, onBack: () -> Unit) {
+fun LayoutScreen(settings: YboardSettings, onBack: () -> Unit, onToolbar: () -> Unit) {
     ScreenScaffold("Layout & size", onBack, preview = settings) {
         Section("Size") {
             SliderRow("Keyboard height", settings.heightScale, 0.75f..1.35f, pct(settings.heightScale)) { v ->
@@ -56,6 +57,7 @@ fun LayoutScreen(settings: YboardSettings, onBack: () -> Unit) {
             SwitchRow("Toolbar", "Shortcut icons above the keys", settings.toolbar) { b ->
                 Prefs.update { it.copy(toolbar = b) }
             }
+            NavRow(R.drawable.ic_grid, Screen.TOOLBAR.title, "Choose which shortcuts to show and in what order", onToolbar)
             if (android.os.Build.VERSION.SDK_INT >= 36) {
                 SwitchRow(
                     "Hide Android's switch-keyboard button",
@@ -93,8 +95,10 @@ fun TypingScreen(settings: YboardSettings, onBack: () -> Unit, onShortcuts: () -
                 "Emoji sprinkle button",
                 if (hasKey) "A ✨ button above the keys adds fitting emojis to your message. Uses your OpenAI key"
                 else "Needs your OpenAI key first (Yboard → Voice typing)",
-                settings.emojiSprinkle,
-            ) { b -> Prefs.update { it.copy(emojiSprinkle = b) } }
+                ToolbarShortcut.SPRINKLE !in settings.toolbarShortcuts.hidden,
+            ) { visible ->
+                Prefs.update { it.copy(toolbarShortcuts = it.toolbarShortcuts.withVisibility(ToolbarShortcut.SPRINKLE, visible)) }
+            }
             NavRow(R.drawable.ic_text_fields, "Text shortcuts", "\"omw\" becomes \"On my way!\" — make your own") { onShortcuts() }
             NavRow(R.drawable.ic_book, "My words", myWordsSummary(settings)) { onMyWords() }
             SwitchRow(

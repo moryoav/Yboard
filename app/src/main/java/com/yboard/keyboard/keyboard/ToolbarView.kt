@@ -13,7 +13,8 @@ import android.view.MotionEvent
 import android.view.View
 import androidx.core.content.ContextCompat
 import com.yboard.keyboard.R
-import com.yboard.keyboard.settings.OneHanded
+import com.yboard.keyboard.settings.ToolbarShortcut
+import com.yboard.keyboard.settings.ToolbarShortcut.*
 import com.yboard.keyboard.settings.YboardSettings
 import kotlin.math.abs
 import kotlin.math.max
@@ -26,22 +27,23 @@ import kotlin.math.roundToInt
  */
 class ToolbarView(context: Context) : View(context) {
 
-    enum class Action { MENU, UNDO, CLIPBOARD, THEMES, EDIT, ONE_HANDED, SPRINKLE, STICKER, MIC }
-
     init {
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
         contentDescription = "Keyboard tools"
     }
 
     interface Listener {
-        fun onToolbar(action: Action)
+        fun onToolbar(action: ToolbarShortcut)
         fun onSuggestion(index: Int) {}
         fun onSuggestionLongPress(index: Int) {}
     }
 
     var listener: Listener? = null
-    var active: Action? = null
-        set(v) { field = v; invalidate() }
+    var active: ToolbarShortcut? = null
+        set(value) {
+            field = value
+            invalidate()
+        }
 
     private var settings = YboardSettings()
     private val density = resources.displayMetrics.density
@@ -50,7 +52,7 @@ class ToolbarView(context: Context) : View(context) {
     private val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
     private val feedback = Feedback(context)
     private val handler = Handler(Looper.getMainLooper())
-    private var pressed: Action? = null
+    private var pressed: ToolbarShortcut? = null
     private var pressedSlot = -1
     val suggestionTouchActive: Boolean get() = pressedSlot >= 0
     private var longPressed = false
@@ -81,24 +83,18 @@ class ToolbarView(context: Context) : View(context) {
 
     val voiceOn: Boolean get() = voiceStatus != null
 
-    // Same order and spacing as Gboard's bar (grid, undo, ..., clipboard, ..., mic).
-    // One-handed mode lives in the app (Layout & size) and on the keyboard's side strip.
-    private val baseItems = listOf(
-        Action.MENU to R.drawable.ic_grid,
-        Action.UNDO to R.drawable.ic_undo,
-        Action.THEMES to R.drawable.ic_palette,
-        Action.CLIPBOARD to R.drawable.ic_clipboard,
-        Action.EDIT to R.drawable.ic_text_edit,
-    )
-    /** Plus the ✨ emoji sprinkle button when it's on. */
-    private var items = baseItems
+    private var shortcuts = settings.toolbarShortcuts.visible
     private fun iconSize(res: Int) = dp(if (res == R.drawable.ic_clipboard || res == R.drawable.ic_palette) 22f else 24f)
     private val icons = HashMap<Int, Drawable>()
     private fun icon(res: Int) = icons.getOrPut(res) { ContextCompat.getDrawable(context, res)!!.mutate() }
 
     fun applySettings(s: YboardSettings) {
+        if (s.toolbarShortcuts != settings.toolbarShortcuts) {
+            cancelSuggestionPress()
+            pressed = null
+            shortcuts = s.toolbarShortcuts.visible
+        }
         settings = s
-        items = if (s.emojiSprinkle) baseItems + (Action.SPRINKLE to R.drawable.ic_emoji_sparkle) else baseItems
         invalidate()
     }
 
@@ -117,106 +113,167 @@ class ToolbarView(context: Context) : View(context) {
         setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), dp(46f).roundToInt())
     }
 
-    private val micR get() = dp(19f)
-    private val micCx get() = width - dp(10f) - micR
-    private val stickerCx get() = micCx - dp(46f)
-    private val toolsRight get() = (if (voiceStatus == null) stickerCx else micCx) - micR - dp(6f)
-    private val step get() = toolsRight / items.size
-    private val slotsLeft get() = step
-    private val slotsRight get() = toolsRight - dp(2f)
-
-    override fun onDraw(canvas: Canvas) {
-        val t = settings.theme
-        val cy = height / 2f
-        val voice = voiceStatus
-        if (voice != null) {
-            drawToolIcon(canvas, 0, Action.MENU, R.drawable.ic_grid, cy)
-            drawVoiceStatus(canvas, voice, cy)
-            drawVoiceMic(canvas, cy)
-            return
-        }
-        if (showingSuggestions) {
-            drawToolIcon(canvas, 0, Action.MENU, R.drawable.ic_grid, cy)
-            drawSuggestions(canvas, cy)
-        } else {
-            items.forEachIndexed { i, (action, res) -> drawToolIcon(canvas, i, action, res, cy) }
-        }
-        drawSticker(canvas, cy)
-        // Same look as the keys (see-through on see-through themes), like Gboard.
-        paint.color = ThemeRender.withAlpha(t.keyColor, if (t.keyOpacity < 0.5f) min(t.keyOpacity * 1.4f, 0.5f) else t.keyOpacity)
-        canvas.drawCircle(micCx, cy, micR, paint)
-        if (pressed == Action.MIC) {
-            paint.color = ThemeRender.withAlpha(t.textColor, 0.15f)
-            canvas.drawCircle(micCx, cy, micR, paint)
-        }
-        drawIcon(canvas, R.drawable.ic_mic, micCx, cy, dp(24f), t.textColor)
+    private data class Slot(val shortcut: ToolbarShortcut?, val left: Float, val right: Float) {
+        val width: Float get() = right - left
     }
 
-    private fun drawSticker(canvas: Canvas, cy: Float) {
-        drawToolIconAt(canvas, stickerCx, Action.STICKER, R.drawable.ic_sticker, cy)
+    private val micR get() = dp(19f)
+    private var slots = emptyList<Slot>()
+    private var textSlot: Slot? = null
+    private var laidOutWidth = -1
+    private var laidOutShortcuts = emptyList<ToolbarShortcut>()
+    private var laidOutVoice = false
+    private var laidOutSuggestions = false
+
+    /** The same slots drive drawing and hit testing. A null shortcut holds text. */
+    private fun updateSlots() {
+        val suggest = showingSuggestions
+        if (laidOutWidth == width && laidOutShortcuts == shortcuts &&
+            laidOutVoice == voiceOn && laidOutSuggestions == suggest
+        ) return
+        laidOutWidth = width
+        laidOutShortcuts = shortcuts
+        laidOutVoice = voiceOn
+        laidOutSuggestions = suggest
+
+        val items: List<ToolbarShortcut?> = when {
+            voiceOn -> buildList {
+                if (MENU in shortcuts) add(MENU)
+                add(null)
+                add(MIC)
+            }
+            suggest -> buildList {
+                // Suggestions go where the first shortcut that they replace used to be.
+                val firstReplaced = shortcuts.indexOfFirst { !it.staysWithSuggestions }
+                val split = if (firstReplaced >= 0) firstReplaced else if (shortcuts.firstOrNull() == MENU) 1 else 0
+                addAll(shortcuts.take(split))
+                add(null)
+                addAll(shortcuts.drop(split).filter { it.staysWithSuggestions })
+            }
+            else -> shortcuts
+        }
+        val ordinaryCount = shortcuts.count { it != MIC && it != STICKER }
+        val reserved = (if (MIC in items) dp(54f) else 0f) + (if (STICKER in items) dp(46f) else 0f)
+        val flexibleCount = if (voiceOn || suggest) maxOf(ordinaryCount, 3) else ordinaryCount
+        // Keep the larger sticker and mic circles at normal widths, and make room for
+        // the other shortcuts on narrow keyboards when many are enabled.
+        val fixedScale = if (reserved > 0f) {
+            min(1f, (width - dp(28f) * flexibleCount).coerceAtLeast(width / 2f) / reserved)
+        } else 1f
+        val freeWidth = width - reserved * fixedScale
+        val ordinaryWidth = freeWidth / flexibleCount.coerceAtLeast(1)
+        val textWidth = freeWidth - if (MENU in items) ordinaryWidth else 0f
+        var left = if (!voiceOn && !suggest && ordinaryCount == 0) freeWidth / 2f else 0f
+        slots = items.map { shortcut ->
+            val slotWidth = when (shortcut) {
+                MIC -> dp(54f) * fixedScale
+                STICKER -> dp(46f) * fixedScale
+                null -> textWidth
+                else -> ordinaryWidth
+            }
+            Slot(shortcut, left, left + slotWidth).also { left = it.right }
+        }
+        textSlot = slots.firstOrNull { it.shortcut == null }
+    }
+
+    private fun Slot.iconCenter(): Float = left + when (shortcut) {
+        MIC -> width * (25f / 54f)
+        STICKER -> width * (25f / 46f)
+        else -> width / 2f
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        updateSlots()
+        val cy = height / 2f
+        val voice = voiceStatus
+        for (slot in slots) {
+            when (val shortcut = slot.shortcut) {
+                null -> if (voice != null) drawVoiceStatus(canvas, voice, slot, cy) else drawSuggestions(canvas, slot, cy)
+                MIC -> if (voice != null) drawVoiceMic(canvas, slot, cy) else drawIdleMic(canvas, slot, cy)
+                else -> drawToolIcon(canvas, slot, shortcut, cy)
+            }
+        }
+    }
+
+    private fun drawIdleMic(canvas: Canvas, slot: Slot, cy: Float) {
+        val t = settings.theme
+        val cx = slot.iconCenter()
+        val radius = min(micR, slot.width / 2f)
+        // Same look as the keys (see-through on see-through themes), like Gboard.
+        paint.color = ThemeRender.withAlpha(t.keyColor, if (t.keyOpacity < 0.5f) min(t.keyOpacity * 1.4f, 0.5f) else t.keyOpacity)
+        canvas.drawCircle(cx, cy, radius, paint)
+        if (pressed == MIC) {
+            paint.color = ThemeRender.withAlpha(t.textColor, 0.15f)
+            canvas.drawCircle(cx, cy, radius, paint)
+        }
+        drawIcon(canvas, MIC.icon, cx, cy, min(dp(24f), slot.width), t.textColor)
     }
 
     override fun onInitializeAccessibilityNodeInfo(info: AccessibilityNodeInfo) {
         super.onInitializeAccessibilityNodeInfo(info)
         info.className = javaClass.name
-        if (voiceStatus == null) info.addAction(AccessibilityNodeInfo.AccessibilityAction(R.id.action_create_sticker, "Create sticker from message"))
+        if (listener != null && !voiceOn && STICKER in shortcuts) {
+            info.addAction(AccessibilityNodeInfo.AccessibilityAction(R.id.action_create_sticker, "Create sticker from message"))
+        }
     }
 
     override fun performAccessibilityAction(action: Int, arguments: Bundle?): Boolean {
-        if (action == R.id.action_create_sticker && voiceStatus == null) {
-            listener?.onToolbar(Action.STICKER)
-            return true
+        if (action == R.id.action_create_sticker && !voiceOn && STICKER in shortcuts) {
+            listener?.let {
+                it.onToolbar(STICKER)
+                return true
+            }
         }
         return super.performAccessibilityAction(action, arguments)
     }
 
-    private fun drawVoiceStatus(canvas: Canvas, status: String, cy: Float) {
+    private fun drawVoiceStatus(canvas: Canvas, status: String, slot: Slot, cy: Float) {
         val t = settings.theme
         text.typeface = Fonts.medium(context)
         text.textSize = dp(15f)
         text.color = ThemeRender.withAlpha(t.textColor, 0.85f)
-        val label = ellipsize(status, slotsRight - slotsLeft - dp(8f))
+        val label = ellipsize(status, slot.width - dp(10f))
         val fm = text.fontMetrics
-        canvas.drawText(label, (slotsLeft + slotsRight) / 2f, cy - (fm.ascent + fm.descent) / 2f, text)
+        canvas.drawText(label, (slot.left + slot.right - dp(2f)) / 2f, cy - (fm.ascent + fm.descent) / 2f, text)
     }
 
     /** The mic while listening: accent colored, with a ring that grows when you talk. */
-    private fun drawVoiceMic(canvas: Canvas, cy: Float) {
+    private fun drawVoiceMic(canvas: Canvas, slot: Slot, cy: Float) {
         val t = settings.theme
+        val cx = slot.iconCenter()
+        val radius = min(micR, slot.width / 2f)
         if (voiceListening) {
             paint.color = ThemeRender.withAlpha(t.accentColor, 0.28f)
-            canvas.drawCircle(micCx, cy, min(micR * (1.04f + 0.2f * voiceLevel), height / 2f), paint)
+            canvas.drawCircle(cx, cy, min(radius * (1.04f + 0.2f * voiceLevel), height / 2f), paint)
         }
         paint.color = if (voiceListening) t.accentColor else ThemeRender.withAlpha(t.accentColor, 0.55f)
-        canvas.drawCircle(micCx, cy, micR, paint)
-        drawIcon(canvas, R.drawable.ic_mic, micCx, cy, dp(24f), t.accentTextColor)
+        canvas.drawCircle(cx, cy, radius, paint)
+        drawIcon(canvas, MIC.icon, cx, cy, min(dp(24f), slot.width), t.accentTextColor)
     }
 
-    private fun drawToolIcon(canvas: Canvas, i: Int, action: Action, res: Int, cy: Float) {
-        drawToolIconAt(canvas, step * (i + 0.5f), action, res, cy)
-    }
-
-    private fun drawToolIconAt(canvas: Canvas, cx: Float, action: Action, res: Int, cy: Float) {
+    private fun drawToolIcon(canvas: Canvas, slot: Slot, shortcut: ToolbarShortcut, cy: Float) {
         val t = settings.theme
-        val isActive = action == active || (action == Action.ONE_HANDED && settings.oneHanded != OneHanded.OFF)
+        val cx = slot.iconCenter()
+        val radius = min(micR, slot.width / 2f)
+        val isActive = shortcut == active
         if (isActive) {
             paint.color = ThemeRender.withAlpha(t.accentColor, 0.32f)
-            canvas.drawCircle(cx, cy, dp(19f), paint)
-        } else if (action == pressed) {
+            canvas.drawCircle(cx, cy, radius, paint)
+        } else if (shortcut == pressed) {
             paint.color = ThemeRender.withAlpha(t.textColor, 0.12f)
-            canvas.drawCircle(cx, cy, dp(19f), paint)
+            canvas.drawCircle(cx, cy, radius, paint)
         }
-        drawIcon(canvas, res, cx, cy, iconSize(res), ThemeRender.withAlpha(t.textColor, if (isActive) 1f else 0.92f))
+        val size = min(iconSize(shortcut.icon), slot.width)
+        drawIcon(canvas, shortcut.icon, cx, cy, size, ThemeRender.withAlpha(t.textColor, if (isActive) 1f else 0.92f))
     }
 
-    /** Where the three slots start and end. Equal thirds, unless a long one (like an email) needs more room. */
-    private var edges = FloatArray(0)
     /** Strip text size; a bit smaller when long chips (like email endings) wouldn't fit. */
     private var stripTextSize = 0f
 
-    private fun slotEdges(): FloatArray {
-        val l = slotsLeft
-        val total = slotsRight - l
+    /** Where the three slots start and end. Equal thirds, unless a long one (like an email) needs more room. */
+    private fun slotEdges(slot: Slot): FloatArray {
+        val l = slot.left
+        val total = (slot.width - dp(2f)).coerceAtLeast(0f)
         val third = total / 3f
         text.typeface = Fonts.medium(context)
         fun needs(size: Float): FloatArray {
@@ -238,9 +295,10 @@ class ToolbarView(context: Context) : View(context) {
         return floatArrayOf(l, l + widths[0], l + widths[0] + widths[1], l + total)
     }
 
-    private fun drawSuggestions(canvas: Canvas, cy: Float) {
+    private fun drawSuggestions(canvas: Canvas, slot: Slot, cy: Float) {
         val t = settings.theme
-        val e = slotEdges().also { edges = it }
+        if (slot.width <= dp(2f)) return
+        val e = slotEdges(slot)
         val even = abs((e[1] - e[0]) - (e[2] - e[1])) < 1f
         for (i in 0 until 3) {
             val left = e[i]
@@ -278,20 +336,20 @@ class ToolbarView(context: Context) : View(context) {
         d.draw(canvas)
     }
 
-    private fun actionAt(x: Float): Action? {
-        if (x > micCx - micR - dp(6f)) return Action.MIC
-        if (voiceStatus != null) return if (x < slotsLeft) Action.MENU else Action.MIC  // tap the bar to stop
-        if (x > toolsRight) return Action.STICKER
-        if (showingSuggestions) return if (x < slotsLeft) Action.MENU else null
-        val i = (x / step).toInt()
-        return items.getOrNull(i)?.first
+    private fun actionAt(x: Float): ToolbarShortcut? {
+        updateSlots()
+        val slot = slots.firstOrNull { x >= it.left && x < it.right } ?: return null
+        return slot.shortcut ?: MIC.takeIf { voiceOn }  // Tap the voice status to stop.
     }
 
     private fun hasSlot(i: Int) = i >= 0 && suggestions.getOrNull(i)?.isNotEmpty() == true
 
     private fun slotAt(x: Float): Int {
-        if (!showingSuggestions || x < slotsLeft || x > slotsRight) return -1
-        val e = edges.takeIf { it.size == 4 } ?: slotEdges()
+        if (!showingSuggestions) return -1
+        updateSlots()
+        val slot = textSlot ?: return -1
+        if (x < slot.left || x >= slot.right - dp(2f)) return -1
+        val e = slotEdges(slot)
         return (0 until 3).firstOrNull { x < e[it + 1] } ?: 2
     }
 

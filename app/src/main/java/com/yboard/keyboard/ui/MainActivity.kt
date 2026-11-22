@@ -46,6 +46,7 @@ enum class Screen(val title: String) {
     THEMES("Themes"),
     CUSTOMIZE("Customize look"),
     LAYOUT("Layout & size"),
+    TOOLBAR("Toolbar shortcuts"),
     TYPING("Typing"),
     SOUND("Sound & vibration"),
     LANGUAGES("Languages"),
@@ -188,7 +189,8 @@ fun YboardSettingsApp(openRequest: MutableState<String?> = mutableStateOf(null))
             Screen.HOME -> HomeScreen(settings, onOpen = { open(it) }, onSearchPick = { open(it.screen, it.target) })
             Screen.THEMES -> ThemesScreen(settings, onBack = ::back, onCustomize = { open(Screen.CUSTOMIZE) })
             Screen.CUSTOMIZE -> CustomizeScreen(settings, onBack = ::back)
-            Screen.LAYOUT -> LayoutScreen(settings, onBack = ::back)
+            Screen.LAYOUT -> LayoutScreen(settings, onBack = ::back, onToolbar = { open(Screen.TOOLBAR) })
+            Screen.TOOLBAR -> ToolbarScreen(settings, onBack = ::back)
             Screen.TYPING -> TypingScreen(
                 settings, onBack = ::back, onShortcuts = { open(Screen.SHORTCUTS) }, onMyWords = { open(Screen.MY_WORDS) },
             )

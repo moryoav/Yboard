@@ -138,6 +138,7 @@ data class YboardSettings(
     val showHints: Boolean = true,
     val keyPopup: Boolean = true,
     val toolbar: Boolean = true,
+    val toolbarShortcuts: ToolbarShortcuts = ToolbarShortcuts(),
     val oneHanded: OneHanded = OneHanded.OFF,
     val bottomOffset: Float = 0f,
     val haptics: Boolean = true,
@@ -190,8 +191,6 @@ data class YboardSettings(
     val myWords: List<String> = emptyList(),
     /** (English, Hebrew) spellings of your words, so voice typing writes a name in the language you speak. */
     val myWordPairs: List<Pair<String, String>> = emptyList(),
-    /** The ✨ button above the keys that adds fitting emojis (AI, uses your OpenAI key). */
-    val emojiSprinkle: Boolean = true,
     /** AI next-word predictions (OpenAI, opt-in). */
     val aiPredictions: Boolean = false,
     val aiModels: AiModels = AiModels(),
@@ -242,6 +241,7 @@ data class YboardSettings(
         put("heightScale", heightScale.toDouble())
         put("numberRow", numberRow); put("showHints", showHints)
         put("keyPopup", keyPopup); put("toolbar", toolbar)
+        put("toolbarShortcuts", toolbarShortcuts.toJson())
         put("oneHanded", oneHanded.name); put("bottomOffset", bottomOffset.toDouble())
         put("haptics", haptics); put("hapticStrength", hapticStrength.toDouble())
         put("sound", sound); put("soundVolume", soundVolume.toDouble())
@@ -264,7 +264,6 @@ data class YboardSettings(
         put("shortcuts", JSONArray().apply { shortcuts.forEach { (s, e) -> put(JSONArray().put(s).put(e)) } })
         put("myWords", JSONArray(myWords))
         put("myWordPairs", JSONArray().apply { myWordPairs.forEach { (e, h) -> put(JSONArray().put(e).put(h)) } })
-        put("emojiSprinkle", emojiSprinkle)
         put("aiPredictions", aiPredictions)
         put("aiModels", aiModels.toJson())
         put("emailHelpers", emailHelpers); put("myEmail", myEmail); put("autofillChips", autofillChips)
@@ -291,6 +290,9 @@ data class YboardSettings(
                     showHints = o.optBoolean("showHints", d.showHints),
                     keyPopup = o.optBoolean("keyPopup", d.keyPopup),
                     toolbar = o.optBoolean("toolbar", d.toolbar),
+                    toolbarShortcuts = ToolbarShortcuts.fromJson(
+                        o.optJSONObject("toolbarShortcuts"), o.optBoolean("emojiSprinkle", true),
+                    ),
                     oneHanded = enumOr(o.optString("oneHanded"), d.oneHanded),
                     bottomOffset = f("bottomOffset", d.bottomOffset),
                     haptics = o.optBoolean("haptics", d.haptics),
@@ -345,7 +347,6 @@ data class YboardSettings(
                                 ?.takeIf { it.first.isNotEmpty() && it.second.isNotEmpty() }
                         }
                     } ?: d.myWordPairs,
-                    emojiSprinkle = o.optBoolean("emojiSprinkle", d.emojiSprinkle),
                     aiPredictions = o.optBoolean("aiPredictions", d.aiPredictions),
                     aiModels = AiModels.fromJson(o.optJSONObject("aiModels")),
                     emailHelpers = o.optBoolean("emailHelpers", d.emailHelpers),
