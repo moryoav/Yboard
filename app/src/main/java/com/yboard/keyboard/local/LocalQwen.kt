@@ -49,7 +49,7 @@ object LocalQwen {
     }
     private fun ensureLoaded(model: QwenModel.Variant) {
         applyMaintenance()
-        check(QwenModel.state.value[model].ready) { "Download the model under Yboard → Typing." }
+        check(QwenModel.state.value[model].ready) { "Download the model under Yboard → AI models → Local predictions." }
         if (loadedModel == model) return
         closeModel()
         mutable.value = Status(loading = true, model = model)

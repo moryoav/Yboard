@@ -93,7 +93,7 @@ object SettingsIndex {
         // Typing
         SettingEntry("Word suggestions", Screen.TYPING, "$TYPING › Suggestions", "suggestions strip words הצעות"),
         SettingEntry("Next-word predictions", Screen.TYPING, "$TYPING › Suggestions", "predict next word"),
-        SettingEntry("Local predictions", Screen.TYPING, TYPING, "qwen gemma llm ai offline download model typing swipe prediction context"),
+        SettingEntry("Local predictions", Screen.AI_MODELS, Screen.AI_MODELS.title, "qwen gemma llm ai offline download model typing swipe prediction context"),
         SettingEntry("AI models", Screen.AI_MODELS, "AI models", "model reasoning thinking effort prediction voice transcription", null),
         SettingEntry("AI usage & cost", Screen.AI_MODELS, "AI models › Usage & estimated cost", "tokens input output cached cost price day week month spending usage", "Usage & estimated cost"),
         SettingEntry("Text shortcuts", Screen.SHORTCUTS, TYPING, "shortcuts omw abbreviation expand קיצורים", null),

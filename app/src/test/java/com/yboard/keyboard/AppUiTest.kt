@@ -32,6 +32,9 @@ class AppUiTest {
         val sprinkle = SettingsIndex.search("emoji sprinkle button").single()
         assertEquals(Screen.TOOLBAR, sprinkle.screen)
         assertEquals(ToolbarShortcut.SPRINKLE.label, sprinkle.target)
+        val localPredictions = SettingsIndex.search("local predictions").first()
+        assertEquals(Screen.AI_MODELS, localPredictions.screen)
+        assertEquals("Local predictions", localPredictions.target)
         assertEquals("Keyboard height", SettingsIndex.search("height").first().title)
         assertTrue(SettingsIndex.search("רקע").isNotEmpty())                // Hebrew words work too
         assertTrue(SettingsIndex.search("swipe color").any { it.title == "Trail color" })  // every word must match

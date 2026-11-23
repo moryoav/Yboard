@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.16.2
+
+- Removed the duplicate Local predictions controls from Typing. Manage local models in AI models.
+- Opened AI models from the keyboard when a local model needs to be downloaded or fixed.
+
 ## 1.16.1
 
 - Removed the duplicate Emoji sprinkle toggle from Typing. Find the control under Layout & size → Toolbar shortcuts.

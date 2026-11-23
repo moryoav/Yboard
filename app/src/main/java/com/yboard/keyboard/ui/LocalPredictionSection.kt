@@ -28,7 +28,7 @@ fun LocalPredictionSection() {
     val downloadInProgress = catalog.models.values.any { it.downloading }
     var showGemmaTerms by rememberSaveable { mutableStateOf(false) }
     var modelToRemove by rememberSaveable { mutableStateOf<QwenModel.Variant?>(null) }
-    Section("Local predictions") {
+    Section("Local predictions", searchable = true) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
             Text("The selected model powers word suggestions and swipe typing offline.", style = MaterialTheme.typography.bodyMedium)
         }

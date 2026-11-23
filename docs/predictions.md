@@ -1,7 +1,7 @@
 # Local word predictions
 
-Typing and swipe ranking use the model selected under **Typing → Local predictions**
-or **AI models → Local predictions**. Qwen3-0.6B-Base is the default. Download
+Typing and swipe ranking use the model selected under **AI models → Local predictions**.
+Qwen3-0.6B-Base is the default. Download
 Qwen3.5-0.8B-Base or Gemma 3 270M Base and tap its row to use it. The downloads
 stay in private no-backup storage across app updates, and the selection survives
 app restarts. The selected model runs through the pinned llama.cpp runtime on

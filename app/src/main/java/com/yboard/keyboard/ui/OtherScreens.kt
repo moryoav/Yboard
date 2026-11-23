@@ -85,7 +85,6 @@ fun TypingScreen(
     val context = LocalContext.current
     var confirmClear by remember { mutableStateOf(false) }
     ScreenScaffold("Typing", onBack) {
-        LocalPredictionSection()
         Section("Suggestions") {
             SwitchRow("Word suggestions", "Show local predictions as you type", settings.suggestions) { b ->
                 Prefs.update { it.copy(suggestions = b) }

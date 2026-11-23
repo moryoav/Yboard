@@ -1402,7 +1402,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     // ------------------------------------------------------------ toolbar
 
     override fun onSuggestion(index: Int) {
-        if (modelNote) { if (modelNoteAction) openApp("typing"); return }
+        if (modelNote) { if (modelNoteAction) openApp(MainActivity.OPEN_AI_MODELS); return }
         endVoice()
         sprinkle?.let { sp ->
             if (index == 1 && sp.newText != null) undoSprinkle()
