@@ -19,7 +19,9 @@ With **Learn my words** enabled, Yboard gives frequently used words a small,
 capped boost among the model's typed-prefix completions and plausible glide
 matches. Learned vocabulary can also supply names to the gesture lexicon.
 Explicitly choosing a suggestion counts more than keeping an automatic glide
-guess. Historical cloud prediction usage remains readable.
+guess. When you edit a recently learned word in the same field, Yboard removes the
+count from that occurrence and learns the corrected spelling when you finish the edit.
+Historical cloud prediction usage remains readable.
 
 ## Context and latency
 

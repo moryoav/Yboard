@@ -54,15 +54,31 @@ class UserWords private constructor(private val sp: SharedPreferences?, private 
     fun spelling(norm: String): String? = mine()[norm] ?: words[norm]?.spelling
 
     fun learn(word: String, amount: Int = 1) {
+        record(word, amount)
+    }
+
+    /** Returns a one-use reversal for the count this occurrence actually added. */
+    internal fun record(word: String, amount: Int): (() -> Unit)? {
         val clean = word.trim()
-        if (clean.length < 2 || clean.length > 32 || clean.any { it.isDigit() || it.isWhitespace() }) return
+        if (clean.length !in 2..32 || clean.any { it.isDigit() || it.isWhitespace() }) return null
         val norm = Dictionary.normalize(clean)
         val e = words.getOrPut(norm) { Entry(clean, 0) }
-        e.count = (e.count + amount).coerceAtMost(9999)
+        val added = minOf(amount, 9999 - e.count)
+        e.count += added
         e.spelling = clean
         revision++
         if (words.size > MAX_WORDS) trim()
         scheduleSave()
+        var remaining = added
+        return {
+            if (remaining > 0 && words[norm] === e) {
+                e.count -= remaining
+                remaining = 0
+                if (e.count <= 0) words.remove(norm)
+                revision++
+                scheduleSave()
+            }
+        }
     }
 
     /** Your most-used learned words (for AI predictions in your style). */

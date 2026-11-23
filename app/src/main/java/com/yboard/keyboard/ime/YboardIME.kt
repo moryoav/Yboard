@@ -65,8 +65,9 @@ import com.yboard.keyboard.text.ScoredWord
 import com.yboard.keyboard.text.Suggester
 import com.yboard.keyboard.text.SwipeDecoder
 import com.yboard.keyboard.text.UserWords
-import com.yboard.keyboard.text.WordReplacement
 import com.yboard.keyboard.text.WordFreq
+import com.yboard.keyboard.text.WordLearning
+import com.yboard.keyboard.text.WordReplacement
 import com.yboard.keyboard.ui.MainActivity
 import com.yboard.keyboard.voice.ApiKeyStore
 import com.yboard.keyboard.voice.OpenAi
@@ -117,6 +118,9 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     private var suggestionsAllowed = false
     private var learningAllowed = false
     private var predictionFieldActive = false
+    private val wordLearning = WordLearning { word, amount ->
+        personalWords(MyWords.languageOf(word))?.record(word, amount)
+    }
 
     /** What each of the 3 strip slots will type ("" = empty slot). */
     private var slotWords: List<String> = emptyList()
@@ -133,7 +137,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     private class AutoCorrection(val original: String, val fixed: String, val separator: String)
     private var lastAutoCorrect: AutoCorrection? = null
 
-    private class SwipeCommit(val word: String, val alternatives: List<String>, val before: String, val cursor: Int?)
+    private class SwipeCommit(val word: String, val alternatives: List<String>, val cursor: Int?)
     private data class RecentSwipe(val word: String, val before: String, val offset: Int?, val alternatives: List<String>)
     private val recentSwipes = ArrayDeque<RecentSwipe>()
     private var lastSwipe: SwipeCommit? = null
@@ -161,7 +165,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         }
         override fun showMessage(text: String) = Toast.makeText(this@YboardIME, text, Toast.LENGTH_LONG).show()
         override fun onDictated(before: String, text: String) {
-            learnAccepted(text, before)
+            learnAccepted(text, null)
         }
         override fun sendMessage(lastTry: Boolean): VoiceTyping.SendResult {
             val info = editorInfo
@@ -327,6 +331,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         super.onStartInputView(info, restarting)
         val continuingEditor = restarting && predictionFieldActive &&
             info.packageName == editorInfo?.packageName && info.fieldId == editorInfo?.fieldId
+        if (!continuingEditor) wordLearning.clear()
         if (!continuingEditor || !canOfferClipboard(info)) dismissClipboardOffer()
         closeSticker()
         cancelAiPredictions()
@@ -362,6 +367,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         LocalQwen.warmUp(this)
         learningAllowed = suggestionsAllowed &&
             (info.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) == 0
+        if (!learningAllowed) wordLearning.clear()
         predictionFieldActive = true
         lastAutoCorrect = null
         lastSwipe = null
@@ -394,6 +400,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     }
 
     override fun onFinishInput() {
+        wordLearning.clear()
         dismissClipboardOffer()
         suggestionSpace = null
         predictionFieldActive = false
@@ -464,6 +471,13 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         }
         voice?.onSelectionChanged(newSelStart, newSelEnd)
         if (bsOrigin >= 0) return  // we're selecting words with the backspace slide
+        if (predictionFieldActive && newSelStart == newSelEnd && wordLearning.maySettleAt(newSelEnd)) {
+            currentInputConnection?.let { learningTarget(it, allowSelection = false) }?.let { editor ->
+                if ((editor.cursor ?: newSelEnd) == newSelEnd && editor.after != null) {
+                    wordLearning.moved(newSelEnd, editor.before, editor.after)
+                }
+            }
+        }
         updateAutoShift()
         updateSuggestions()
     }
@@ -473,6 +487,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         qwenWords = emptyList()
         qwenInput = null
         settings = s
+        if (!s.learnWords) wordLearning.clear()
         voice?.namePairs = s.myWordPairs
         UserWords.setMyWords(s.myWords)
         root?.apply(s)
@@ -534,8 +549,8 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     private fun isWordChar(c: Char) = PredictionContext.isWordChar(c)
 
     /** The word right before the cursor (what you're typing now). */
-    private fun wordBeforeCursor(): String {
-        val before = suggestionText?.takeLast(48) ?: currentInputConnection?.getTextBeforeCursor(48, 0) ?: return ""
+    private fun wordBeforeCursor(snapshot: String? = null): String {
+        val before = snapshot ?: suggestionText?.takeLast(48) ?: currentInputConnection?.getTextBeforeCursor(48, 0) ?: return ""
         var i = before.length
         while (i > 0 && isWordChar(before[i - 1])) i--
         return before.subSequence(i, before.length).toString().trimStart('\'', '’', '׳', '״')
@@ -550,12 +565,6 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
 
     private fun personalWords(language: String = settings.activeLanguage) =
         if (settings.learnWords && learningAllowed) UserWords.get(this, language) else null
-
-    private fun learn(word: String, amount: Int = 1) {
-        if (!settings.learnWords || !learningAllowed) return
-        if (word.any { it.isDigit() }) return
-        userWords().learn(word, amount)
-    }
 
     private fun swipeWordBeforeCursor(): Boolean {
         val ls = lastSwipe ?: return false
@@ -722,23 +731,17 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         main.postDelayed(pending, 15)
     }
 
-    /** Sentence context before the word being accepted, excluding its unfinished prefix. */
-    private fun contextBefore(word: String): String {
-        val before = currentInputConnection?.getTextBeforeCursor(SentenceContext.READ_LIMIT, 0)?.toString().orEmpty()
-        return if (word.isNotEmpty() && before.endsWith(word)) before.dropLast(word.length) else before
-    }
-
-    private fun learnAccepted(text: String, before: String, amount: Int = 1) {
+    private fun learnAccepted(text: String, start: Int?, amount: Int = 1) {
         if (!settings.learnWords || !learningAllowed) return
-        Regex("[\\p{L}\\p{M}'’]+|[.!?\\n]").findAll(text).forEach { token ->
-            if (token.value in listOf(".", "!", "?", "\n")) return@forEach
-            learn(token.value, amount)
+        val offset = start?.takeIf { it >= 0 }
+        LEARNED_TOKEN.findAll(text).forEach { token ->
+            wordLearning.confirm(offset?.plus(token.range.first), token.value, amount)
         }
     }
 
     private fun acceptSwipe() {
         val swipe = lastSwipe ?: return
-        if (swipeWordBeforeCursor()) learnAccepted(swipe.word, swipe.before)
+        if (swipeWordBeforeCursor()) learnAccepted(swipe.word, (swipe.cursor ?: selEnd) - swipe.word.length)
         lastSwipe = null
     }
 
@@ -825,31 +828,32 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         val fix = shortcutFor(w) ?: return false
         if (fix == w) return false
         ic.beginBatchEdit()
-        ic.deleteSurroundingText(w.length, 0)
-        ic.commitText(fix + separator, 1)
+        val committed = ic.deleteSurroundingText(w.length, 0) && ic.commitText(fix + separator, 1)
         ic.endBatchEdit()
+        if (!committed) return false
         lastAutoCorrect = AutoCorrection(w, fix, separator)
         return true
     }
 
     /** Called when a word is finished by space / punctuation / enter. */
-    private fun finishWord(separator: String): Boolean {
+    private fun finishWord(separator: String, target: EditorTarget?): Boolean {
         val wasSwipe = swipeWordBeforeCursor()
         acceptSwipe()
         if (wasSwipe) return false
-        val typed = wordBeforeCursor()
-        if (typed == "i" && capitalizeTypedPronoun(separator)) {
-            learn("I")
-            return true
-        }
-        val before = if (typed.isNotEmpty() && suggestionsAllowed) contextBefore(typed) else ""
+        val typed = wordBeforeCursor(target?.before)
+        if (typed == "i" && capitalizeTypedPronoun(separator)) return true
+        val start = (target?.cursor ?: selEnd).minus(typed.length).takeIf { it >= 0 }
         if (applyAutoCorrect(separator)) {
-            lastAutoCorrect?.let { learnAccepted(it.fixed, before) }
+            lastAutoCorrect?.let {
+                trackLearningEdit(target, it.fixed + separator, deleteBefore = typed.length)
+                learnAccepted(it.fixed, start)
+            }
             return true
         }
-        val w = typed
-        if (w.isNotEmpty() && !cursorInsideWord() && suggestionsAllowed) {
-            learn(w)
+        if (settings.learnWords && learningAllowed && typed.isNotEmpty() &&
+            (target?.selected?.isEmpty() ?: (selStart == selEnd))) {
+            val insideWord = target?.after?.let { it.firstOrNull()?.let(::isWordElement) == true } ?: cursorInsideWord()
+            if (!insideWord) wordLearning.confirm(start, typed)
         }
         return false
     }
@@ -948,11 +952,13 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         val prependSpace = text.firstOrNull()?.isLetterOrDigit() == true && swipeWordBeforeCursor()
         val replacedSpace = replaceSuggestionSpace(ic, text)
         if (!replacedSpace) {
-            val finished = if (text in PUNCTUATION) finishWord(text) else {
+            val target = learningTarget(ic, captureNewWord = text in PUNCTUATION)
+            val finished = if (text in PUNCTUATION) finishWord(text, target) else {
                 acceptSwipe()
                 text.firstOrNull()?.let { !isWordElement(it) } == true && capitalizeTypedPronoun(text)
             }
-            if (!finished) ic.commitText(if (prependSpace) " $text" else text, 1)
+            val inserted = if (prependSpace) " $text" else text
+            if (!finished && ic.commitText(inserted, 1)) trackLearningEdit(target, inserted, manual = true)
         }
         finishTextKey(replacedSpace)
     }
@@ -980,15 +986,18 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         if (settings.doubleSpacePeriod && now - lastSpaceTime < 700) {
             val before = ic.getTextBeforeCursor(2, 0)
             if (before != null && before.length == 2 && before[1] == ' ' && before[0].isLetterOrDigit()) {
+                val target = learningTarget(ic)
                 ic.beginBatchEdit()
-                ic.deleteSurroundingText(1, 0)
-                ic.commitText(". ", 1)
+                if (ic.deleteSurroundingText(1, 0) && ic.commitText(". ", 1)) {
+                    trackLearningEdit(target, ". ", deleteBefore = 1)
+                }
                 ic.endBatchEdit()
                 lastSpaceTime = 0
                 return
             }
         }
-        if (!finishWord(" ")) ic.commitText(" ", 1)
+        val target = learningTarget(ic, captureNewWord = true)
+        if (!finishWord(" ", target) && ic.commitText(" ", 1)) trackLearningEdit(target, " ", manual = true)
         lastSpaceTime = now
     }
 
@@ -996,6 +1005,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         dismissClipboardOffer()
         suggestionSpace = null
         val ic = currentInputConnection ?: return
+        val target = learningTarget(ic)
         lastSpaceTime = 0
         // Backspace right after an autocorrect puts back what you typed.
         lastAutoCorrect?.let { ac ->
@@ -1003,24 +1013,26 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
             val expect = ac.fixed + ac.separator
             if (ic.getTextBeforeCursor(expect.length, 0)?.toString() == expect) {
                 ic.beginBatchEdit()
-                ic.deleteSurroundingText(expect.length, 0)
-                ic.commitText(ac.original, 1)
+                val committed = ic.deleteSurroundingText(expect.length, 0) && ic.commitText(ac.original, 1)
                 ic.endBatchEdit()
                 rejected.add(Dictionary.normalize(ac.original))
-                learn(ac.original)
+                if (committed) {
+                    trackLearningEdit(target, ac.original, deleteBefore = expect.length)
+                    wordLearning.confirm((target?.cursor ?: selEnd) - expect.length, ac.original)
+                }
                 return
             }
         }
         val selected = ic.getSelectedText(0)
         if (!selected.isNullOrEmpty()) {
-            ic.commitText("", 1)
+            if (ic.commitText("", 1)) trackLearningEdit(target, "", manual = true)
             return
         }
         // Backspace right after a swiped word deletes the whole word, like Gboard.
         if (swipeWordBeforeCursor()) {
             val w = lastSwipe!!.word
             lastSwipe = null
-            ic.deleteSurroundingText(w.length, 0)
+            if (ic.deleteSurroundingText(w.length, 0)) trackLearningEdit(target, "", deleteBefore = w.length)
             return
         }
         val before = ic.getTextBeforeCursor(32, 0)
@@ -1034,7 +1046,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         bi.setText(text)
         val start = bi.preceding(text.length)
         val count = if (start == BreakIterator.DONE) 1 else (text.length - start).coerceAtLeast(1)
-        ic.deleteSurroundingText(count, 0)
+        if (ic.deleteSurroundingText(count, 0)) trackLearningEdit(target, "", deleteBefore = count, manual = true)
     }
 
     private fun handleEnter() {
@@ -1045,7 +1057,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         val type = root?.keyboard?.enterType ?: EnterType.NEWLINE
         lastSpaceTime = 0
         // Finish the current word first (autocorrect it if needed), without adding a separator.
-        finishWord("")
+        finishWord("", learningTarget(ic, captureNewWord = true))
         when {
             type != EnterType.NEWLINE && info != null ->
                 ic.performEditorAction(info.imeOptions and EditorInfo.IME_MASK_ACTION)
@@ -1164,6 +1176,31 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         if (!allowSelection && selected.isNotEmpty()) return null
         val before = connection.getTextBeforeCursor(limit, 0)?.toString() ?: return null
         return EditorTarget(before, connection.getTextAfterCursor(afterLimit, 0)?.toString(), null, selected)
+    }
+
+    private fun learningTarget(
+        connection: InputConnection,
+        captureNewWord: Boolean = false,
+        allowSelection: Boolean = true,
+    ): EditorTarget? {
+        if (!settings.learnWords || !learningAllowed || (wordLearning.isEmpty && !captureNewWord)) return null
+        return editorTarget(connection, limit = 80, afterLimit = 80, allowSelection = allowSelection)
+    }
+
+    private fun trackLearningEdit(
+        target: EditorTarget?, inserted: String, deleteBefore: Int = 0, deleteAfter: Int = 0, manual: Boolean = false,
+    ) {
+        if (target == null || !settings.learnWords || !learningAllowed || wordLearning.isEmpty) return
+        val after = target.after ?: return
+        val start = (target.cursor ?: minOf(selStart, selEnd)) - deleteBefore
+        if (start < 0 || target.before.length < deleteBefore || after.length < deleteAfter) return
+        if (start == 0 && target.before.isEmpty() && target.selected.isEmpty() && after.isEmpty()) {
+            wordLearning.clear()
+            return
+        }
+        val before = target.before.dropLast(deleteBefore)
+        val removed = target.before.takeLast(deleteBefore) + target.selected + after.take(deleteAfter)
+        wordLearning.edited(start, before, removed, after.drop(deleteAfter), inserted, manual)
     }
 
     private fun isWordElement(char: Char): Boolean = isWordChar(char) || char.isDigit()
@@ -1289,7 +1326,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         val connection = target.connection
         if (Build.VERSION.SDK_INT >= 34 && target.editor.cursor != null &&
             connection.replaceText(target.start, target.end, word, 1, null)) {
-            personalWords(target.language)?.learn(word, 2)
+            learnReplacement(target, word)
             return
         }
 
@@ -1297,7 +1334,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         try {
             if (connection.setSelection(target.start, target.end)) {
                 if (connection.getSelectedText(0)?.toString() == target.span.word && connection.commitText(word, 1)) {
-                    personalWords(target.language)?.learn(word, 2)
+                    learnReplacement(target, word)
                 } else {
                     connection.setSelection(target.cursor, target.cursor)
                 }
@@ -1305,6 +1342,11 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         } finally {
             connection.endBatchEdit()
         }
+    }
+
+    private fun learnReplacement(target: Replacement, word: String) {
+        trackLearningEdit(target.editor, word, deleteBefore = target.span.left, deleteAfter = target.span.right)
+        wordLearning.confirm(target.start, word, 2)
     }
 
     private fun swipeContext(before: String, cursor: Int): String? {
@@ -1368,8 +1410,10 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
                 updateSuggestions()
                 return@rank
             }
+            if (capitalizeBefore) trackLearningEdit(target, "I$insert", deleteBefore = 1)
+            else trackLearningEdit(target, insert)
             if (shift == ShiftState.ON) setShift(ShiftState.OFF)
-            lastSwipe = SwipeCommit(word, alternatives, before, target.cursor?.plus(insert.length))
+            lastSwipe = SwipeCommit(word, alternatives, target.cursor?.plus(insert.length))
             if (suggestionsAllowed) {
                 if (recentSwipes.size == 32) recentSwipes.removeFirst()
                 recentSwipes.addLast(RecentSwipe(word, (before + space).takeLast(24),
@@ -1416,7 +1460,10 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     override fun onBackspaceSwipeEnd(apply: Boolean) {
         val ic = currentInputConnection
         if (ic != null && bsOrigin >= 0) {
-            if (apply) ic.commitText("", 1) else ic.setSelection(bsOrigin, bsOrigin)
+            if (apply) {
+                val target = learningTarget(ic)
+                if (ic.commitText("", 1)) trackLearningEdit(target, "")
+            } else ic.setSelection(bsOrigin, bsOrigin)
         }
         bsOrigin = -1
         bsText = null
@@ -1466,29 +1513,33 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
             return
         }
         val ls = lastSwipe
+        val target = learningTarget(ic, captureNewWord = true)
         if (ls != null && swipeWordBeforeCursor()) {
             // A tap accepts the word and advances the strip to next-word predictions.
             ic.beginBatchEdit()
-            ic.deleteSurroundingText(ls.word.length, 0)
             lastSwipe = null
-            val committed = commitSpacedSuggestion(ic, word, ls.word.length)
+            val committed = ic.deleteSurroundingText(ls.word.length, 0) && commitSpacedSuggestion(ic, word, ls.word.length)
             ic.endBatchEdit()
-            if (committed) learnAccepted(word, ls.before, 2)
+            if (committed) learnSpacedSuggestion(target, word, ls.word.length)
             currentWord = ""
             updateSuggestions()
             return
         }
         val w = currentWord
-        val before = contextBefore(w)
         ic.beginBatchEdit()
-        ic.deleteSurroundingText(w.length, 0)
-        val committed = commitSpacedSuggestion(ic, word, w.length)
+        val committed = (w.isEmpty() || ic.deleteSurroundingText(w.length, 0)) && commitSpacedSuggestion(ic, word, w.length)
         ic.endBatchEdit()
         // Picking exactly what you typed teaches Yboard that word right away.
-        if (committed) learnAccepted(word, before, 2)
+        if (committed) learnSpacedSuggestion(target, word, w.length)
         currentWord = ""
         if (shift == ShiftState.ON) setShift(ShiftState.OFF)
         updateSuggestions()
+    }
+
+    private fun learnSpacedSuggestion(target: EditorTarget?, word: String, replacedLength: Int) {
+        val accepted = capitalizePronoun(word)
+        trackLearningEdit(target, "$accepted ", deleteBefore = replacedLength)
+        learnAccepted(accepted, (target?.cursor ?: selEnd) - replacedLength, 2)
     }
 
     private fun commitSpacedSuggestion(ic: InputConnection, word: String, replacedLength: Int = 0): Boolean {
@@ -2083,6 +2134,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         private val CLIPBOARD_PREVIEW_WHITESPACE = Regex("[\\s\\p{Z}]+")
 
         /** Typing one of these right after a word finishes the word (and may autocorrect it). */
+        private val LEARNED_TOKEN = Regex("[\\p{L}\\p{M}'’׳״]+")
         private val PUNCTUATION = setOf(".", ",", "!", "?", ";", ":")
     }
 }

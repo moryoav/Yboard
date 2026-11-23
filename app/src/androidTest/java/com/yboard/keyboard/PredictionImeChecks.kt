@@ -296,6 +296,90 @@ internal class PredictionImeChecks(private val instrumentation: Instrumentation)
         }
     }
 
+    fun checkCorrectionLearning(): String {
+        val context = instrumentation.targetContext
+        Prefs.init(context)
+        val saved = Prefs.current
+        val hebrew = UserWords.get(context, "he")
+        val english = UserWords.get(context, "en")
+        val typo = "הקודמץ"
+        val correct = "הקודמת"
+        val words = listOf(hebrew to typo, hebrew to correct, english to "teh", english to "the")
+        val original = mutableListOf<Pair<String?, Int>>()
+        onMain {
+            words.forEach { (store, word) ->
+                check(!store.isMine(word))
+                original.add(store.spelling(word) to store.count(word))
+                store.forget(word)
+            }
+        }
+        fun type(word: String) = word.forEach { ime.onKey(KeyDef(KeyType.CHAR, it.toString())) }
+        fun space() = ime.onKey(KeyDef(KeyType.SPACE, " "))
+        fun backspace() = ime.onKey(KeyDef(KeyType.BACKSPACE))
+        fun move(offset: Int) {
+            onMain { check(ime.currentInputConnection.setSelection(offset, offset)) }
+            await("caret reached $offset") { field("selEnd").getInt(ime) == offset && text().length == offset }
+        }
+        try {
+            onMain { Prefs.update { it.copy(language = "he", learnWords = true, suggestions = false,
+                autoCaps = false, doubleSpacePeriod = false) } }
+            launch("")
+            onMain { type(typo); space() }
+            await("Hebrew typo initially counted") { draft() == "$typo " && hebrew.count(typo) == 1 }
+            val persisted = context.getSharedPreferences("yboard_words", Context.MODE_PRIVATE)
+            fun storedHebrew() = JSONObject(persisted.getString("he", "{}").orEmpty())
+            await("original typo saved") { storedHebrew().has(typo) }
+            onMain { backspace(); backspace(); type("ת"); space() }
+            await("final-letter correction transfers learning") {
+                draft() == "$correct " && hebrew.count(correct) == 1 && hebrew.count(typo) == 0
+            }
+            await("corrected word saved without typo") {
+                !storedHebrew().has(typo) && storedHebrew().optJSONArray(correct)?.optInt(1) == 1
+            }
+
+            launch("")
+            onMain { type(typo); space(); type(typo); space() }
+            await("two occurrences recorded") { draft() == "$typo $typo " && hebrew.count(typo) == 2 }
+            move(typo.length)
+            onMain { backspace(); type("ת") }
+            move(typo.length + 1)
+            await("correcting one occurrence preserves the other") {
+                draft() == "$correct $typo " && hebrew.count(correct) == 2 && hebrew.count(typo) == 1
+            }
+
+            onMain { Prefs.update { it.copy(language = "en") } }
+            launch("")
+            onMain { type("teh"); space() }
+            await("English typo initially counted") { draft() == "teh " && english.count("teh") == 1 }
+            move(1)
+            await("spelling suggestion available") { slots().contains("the") }
+            onMain { ime.onSuggestion(slots().indexOf("the")) }
+            await("selected correction transfers learning") {
+                draft() == "the " && english.count("teh") == 0 && english.count("the") == 2
+            }
+            onMain { space() }
+            await("spacing a corrected word does not count it again") { draft() == "the  " && english.count("the") == 2 }
+
+            launch("", options = EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING)
+            val teaCount = english.count("tea")
+            onMain { type("teh"); space(); backspace(); backspace(); type("a"); space() }
+            await("private field stays out of learning") {
+                draft() == "tea " && english.count("teh") == 0 && english.count("tea") == teaCount
+            }
+        } finally {
+            onMain {
+                words.zip(original).forEach { (key, entry) ->
+                    val (store, word) = key
+                    val (spelling, count) = entry
+                    store.forget(word)
+                    if (spelling != null && count > 0) store.learn(spelling, count)
+                }
+                Prefs.update { saved }
+            }
+        }
+        return "PASS: Hebrew manual corrections, independent occurrences, saved learning, suggestion corrections and private fields"
+    }
+
     private fun checkAddressBarGlide() {
         val urlInput = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI or
             InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
