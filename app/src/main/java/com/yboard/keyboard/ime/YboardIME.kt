@@ -1,6 +1,7 @@
 package com.yboard.keyboard.ime
 
 import android.Manifest
+import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.pm.PackageManager
 import android.content.Intent
@@ -93,6 +94,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     private var selecting = false
     private var clipboard: ClipboardManager? = null
     private val clips = mutableListOf<String>()
+    private var offeredClipTimestamp: Long? = null
 
     // Cursor position reported by the app.
     private var selStart = -1
@@ -195,7 +197,13 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     }
 
     private val settingsListener: (YboardSettings) -> Unit = { s -> onSettingsChanged(s) }
-    private val clipListener = ClipboardManager.OnPrimaryClipChangedListener { captureClip() }
+    private val expireClipboardOffer = Runnable { dismissClipboardOffer() }
+    private val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
+        offeredClipTimestamp?.let {
+            if (clipboard?.primaryClipDescription?.timestamp != it) dismissClipboardOffer()
+        }
+        captureClip()
+    }
 
     // ------------------------------------------------------------ lifecycle
 
@@ -220,6 +228,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     }
 
     override fun onDestroy() {
+        dismissClipboardOffer()
         closeSticker()
         imageWorker.shutdownNow()
         endVoice()
@@ -318,6 +327,9 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
 
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) {
         super.onStartInputView(info, restarting)
+        val continuingEditor = restarting && predictionFieldActive &&
+            info.packageName == editorInfo?.packageName && info.fieldId == editorInfo?.fieldId
+        if (!continuingEditor || !canOfferClipboard(info)) dismissClipboardOffer()
         closeSticker()
         cancelAiPredictions()
         LocalQwen.clearContext()
@@ -363,9 +375,11 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         refreshLayout()
         updateAutoShift()
         updateSuggestions()
+        if (!continuingEditor) offerClipboardText(info)
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
+        dismissClipboardOffer()
         suggestionSpace = null
         predictionFieldActive = false
         clearReplacementSession()
@@ -382,6 +396,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     }
 
     override fun onFinishInput() {
+        dismissClipboardOffer()
         suggestionSpace = null
         predictionFieldActive = false
         clearReplacementSession()
@@ -893,6 +908,13 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
 
     // ------------------------------------------------------- key handling
 
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (event.isPrintingKey || keyCode == KeyEvent.KEYCODE_DEL || keyCode == KeyEvent.KEYCODE_ENTER) {
+            dismissClipboardOffer()
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
     override fun onKey(key: KeyDef) {
         dismissWordReplacement()
         stripBefore = null
@@ -922,6 +944,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     }
 
     private fun commitTextKey(text: String) {
+        dismissClipboardOffer()
         lastAutoCorrect = null
         val ic = currentInputConnection ?: return
         val prependSpace = text.firstOrNull()?.isLetterOrDigit() == true && swipeWordBeforeCursor()
@@ -952,6 +975,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     }
 
     private fun handleSpace() {
+        dismissClipboardOffer()
         suggestionSpace = null
         val ic = currentInputConnection ?: return
         val now = SystemClock.uptimeMillis()
@@ -971,6 +995,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     }
 
     private fun handleBackspace() {
+        dismissClipboardOffer()
         suggestionSpace = null
         val ic = currentInputConnection ?: return
         lastSpaceTime = 0
@@ -1015,6 +1040,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     }
 
     private fun handleEnter() {
+        dismissClipboardOffer()
         suggestionSpace = null
         val ic = currentInputConnection ?: return
         val info = editorInfo
@@ -1085,6 +1111,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     private var preparedSwipe: PreparedSwipe? = null
 
     override fun onSwipeStart() {
+        dismissClipboardOffer()
         preparedSwipe = null
         dismissWordReplacement()
         if (swipePending || !glideAllowed() || !QwenModel.selectedState.ready) return
@@ -1368,6 +1395,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     // ------------------------------------------------ backspace word-swipe
 
     override fun onBackspaceSwipe(words: Int) {
+        dismissClipboardOffer()
         suggestionSpace = null
         endVoice()
         if (swipePending) cancelAiPredictions()
@@ -1511,6 +1539,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
 
     override fun onToolbar(action: ToolbarShortcut) {
         val r = root ?: return
+        dismissClipboardOffer()
         if (swipePending) cancelAiPredictions()
         if (action != ToolbarShortcut.STICKER) closeSticker()
         if (action == ToolbarShortcut.MIC) {
@@ -1975,11 +2004,66 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         ic.sendKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP, code, 0, meta))
     }
 
+    private fun offerClipboardText(info: EditorInfo) {
+        if (!canOfferClipboard(info)) return
+        val timestamp = clipboard?.primaryClipDescription?.timestamp ?: return
+        val text = freshClipboardText(timestamp) ?: return
+        val trimmed = text.trim()
+        val preview = trimmed.take(CLIPBOARD_PREVIEW_LIMIT).trimEnd(Char::isHighSurrogate)
+            .replace(CLIPBOARD_PREVIEW_WHITESPACE, " ").trimEnd()
+        val label = if (trimmed.length > CLIPBOARD_PREVIEW_LIMIT) "$preview…" else preview
+        offeredClipTimestamp = timestamp
+        root?.toolbar?.setClipboardSuggestion(label)
+        main.postDelayed(expireClipboardOffer, clipboardOfferTimeLeft(timestamp).coerceAtLeast(0L))
+    }
+
+    private fun canOfferClipboard(info: EditorInfo): Boolean =
+        settings.toolbar && info.inputType != InputType.TYPE_NULL && !isPasswordField(info)
+
+    private fun clipboardOfferTimeLeft(timestamp: Long): Long {
+        val age = System.currentTimeMillis() - timestamp
+        return if (timestamp > 0 && age >= 0) CLIPBOARD_OFFER_DURATION_MS - age else 0L
+    }
+
+    private fun freshClipboardText(timestamp: Long): String? {
+        if (clipboardOfferTimeLeft(timestamp) <= 0 || Prefs.pastedClipTimestamp == timestamp) return null
+        val clip = clipboard?.primaryClip ?: return null
+        val description = clip.description
+        if (description.timestamp != timestamp ||
+            description.extras?.getBoolean(ClipDescription.EXTRA_IS_SENSITIVE) == true ||
+            clip.itemCount == 0
+        ) return null
+        return clip.getItemAt(0).text?.toString()?.takeUnless { it.isBlank() || ApiKeyStore.looksLikeSecret(it) }
+    }
+
+    private fun dismissClipboardOffer() {
+        if (offeredClipTimestamp == null) return
+        offeredClipTimestamp = null
+        main.removeCallbacks(expireClipboardOffer)
+        root?.toolbar?.setClipboardSuggestion(null)
+    }
+
+    override fun onClipboardSuggestion() {
+        val timestamp = offeredClipTimestamp ?: return
+        dismissClipboardOffer()
+        val ic = currentInputConnection ?: return
+        val text = freshClipboardText(timestamp) ?: return
+        if (!ic.commitText(text, 1)) return
+        Prefs.pastedClipTimestamp = timestamp
+        suggestionSpace = null
+        lastAutoCorrect = null
+        lastSwipe = null
+        lastSpaceTime = 0
+        cancelAiPredictions()
+        updateAutoShift()
+        updateSuggestions()
+    }
+
     private fun captureClip() {
         try {
             val clip = clipboard?.primaryClip ?: return
             val extras = clip.description?.extras
-            if (extras?.getBoolean("android.content.extra.IS_SENSITIVE") == true) return
+            if (extras?.getBoolean(ClipDescription.EXTRA_IS_SENSITIVE) == true) return
             if (clip.itemCount == 0) return
             val text = clip.getItemAt(0)?.coerceToText(this)?.toString()?.trim()
             if (text.isNullOrEmpty()) return
@@ -1994,6 +2078,10 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     }
 
     companion object {
+        private const val CLIPBOARD_OFFER_DURATION_MS = 120_000L
+        private const val CLIPBOARD_PREVIEW_LIMIT = 160
+        private val CLIPBOARD_PREVIEW_WHITESPACE = Regex("[\\s\\p{Z}]+")
+
         /** Typing one of these right after a word finishes the word (and may autocorrect it). */
         private val PUNCTUATION = setOf(".", ",", "!", "?", ";", ":")
     }

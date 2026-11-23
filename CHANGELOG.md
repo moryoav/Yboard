@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.17.0
+
+- Added a paste suggestion when the keyboard opens within two minutes of copying text. Tap the preview to paste the full text.
+
 ## 1.16.5
 
 - Added Fastest and Most accurate options for live transcription under Voice typing → Listening preferences.

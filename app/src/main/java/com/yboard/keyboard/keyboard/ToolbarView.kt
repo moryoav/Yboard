@@ -8,6 +8,9 @@ import android.graphics.drawable.Drawable
 import android.os.Handler
 import android.os.Looper
 import android.os.Bundle
+import android.text.TextPaint
+import android.text.TextUtils
+import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.MotionEvent
 import android.view.View
@@ -36,6 +39,7 @@ class ToolbarView(context: Context) : View(context) {
         fun onToolbar(action: ToolbarShortcut)
         fun onSuggestion(index: Int) {}
         fun onSuggestionLongPress(index: Int) {}
+        fun onClipboardSuggestion() {}
     }
 
     var listener: Listener? = null
@@ -49,7 +53,7 @@ class ToolbarView(context: Context) : View(context) {
     private val density = resources.displayMetrics.density
     private fun dp(v: Float) = v * density
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
+    private val text = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
     private val feedback = Feedback(context)
     private val handler = Handler(Looper.getMainLooper())
     private var pressed: ToolbarShortcut? = null
@@ -66,6 +70,7 @@ class ToolbarView(context: Context) : View(context) {
 
     private var suggestions: List<String> = emptyList()
     private var primary = -1
+    private var clipboardSuggestion: String? = null
 
     // AI voice typing: status text, mic loudness (0..1), and whether it's listening.
     private var voiceStatus: String? = null
@@ -108,7 +113,18 @@ class ToolbarView(context: Context) : View(context) {
         invalidate()
     }
 
-    val showingSuggestions: Boolean get() = suggestions.any { it.isNotEmpty() } && active == null && voiceStatus == null
+    fun setClipboardSuggestion(preview: String?) {
+        if (clipboardSuggestion == preview) return
+        cancelSuggestionPress()
+        pressed = null
+        clipboardSuggestion = preview
+        invalidate()
+        sendAccessibilityEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED)
+    }
+
+    private val showingClipboard: Boolean get() = clipboardSuggestion != null && active == null && !voiceOn
+    val showingSuggestions: Boolean
+        get() = (clipboardSuggestion != null || suggestions.any { it.isNotEmpty() }) && active == null && !voiceOn
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), dp(46f).roundToInt())
@@ -197,7 +213,11 @@ class ToolbarView(context: Context) : View(context) {
         val voice = voiceStatus
         for (slot in slots) {
             when (val shortcut = slot.shortcut) {
-                null -> if (voice != null) drawVoiceStatus(canvas, voice, slot, cy) else drawSuggestions(canvas, slot, cy)
+                null -> when {
+                    voice != null -> drawVoiceStatus(canvas, voice, slot, cy)
+                    showingClipboard -> drawClipboardSuggestion(canvas, slot, cy)
+                    else -> drawSuggestions(canvas, slot, cy)
+                }
                 MIC -> if (voice != null) drawVoiceMic(canvas, slot, cy) else drawIdleMic(canvas, slot, cy)
                 else -> drawToolIcon(canvas, slot, shortcut, cy)
             }
@@ -224,9 +244,18 @@ class ToolbarView(context: Context) : View(context) {
         if (listener != null && showsSticker()) {
             info.addAction(AccessibilityNodeInfo.AccessibilityAction(R.id.action_create_sticker, "Create sticker from message"))
         }
+        if (listener != null && showingClipboard) {
+            info.addAction(AccessibilityNodeInfo.AccessibilityAction(R.id.action_paste_clipboard, context.getString(R.string.paste_clipboard_text)))
+        }
     }
 
     override fun performAccessibilityAction(action: Int, arguments: Bundle?): Boolean {
+        if (action == R.id.action_paste_clipboard && showingClipboard) {
+            listener?.let {
+                it.onClipboardSuggestion()
+                return true
+            }
+        }
         if (action == R.id.action_create_sticker && showsSticker()) {
             listener?.let {
                 it.onToolbar(STICKER)
@@ -249,6 +278,27 @@ class ToolbarView(context: Context) : View(context) {
         val label = ellipsize(status, slot.width - dp(10f))
         val fm = text.fontMetrics
         canvas.drawText(label, (slot.left + slot.right - dp(2f)) / 2f, cy - (fm.ascent + fm.descent) / 2f, text)
+    }
+
+    private fun drawClipboardSuggestion(canvas: Canvas, slot: Slot, cy: Float) {
+        val preview = clipboardSuggestion ?: return
+        val theme = settings.theme
+        val iconSize = dp(18f)
+        val gap = dp(8f)
+        val available = slot.width - dp(24f) - iconSize - gap
+        if (available <= 0f) return
+        text.typeface = Fonts.medium(context)
+        text.textSize = dp(16.5f)
+        text.color = theme.textColor
+        val label = TextUtils.ellipsize(preview, text, available, TextUtils.TruncateAt.END).toString()
+        val labelWidth = text.measureText(label)
+        val cx = (slot.left + slot.right) / 2f
+        val iconX = cx - (labelWidth + gap) / 2f
+        paint.color = ThemeRender.withAlpha(theme.textColor, if (pressedSlot == 0) 0.16f else 0.08f)
+        canvas.drawRoundRect(slot.left + dp(2f), dp(5f), slot.right - dp(2f), height - dp(5f), dp(12f), dp(12f), paint)
+        drawIcon(canvas, CLIPBOARD.icon, iconX, cy, iconSize, theme.textColor)
+        val fm = text.fontMetrics
+        canvas.drawText(label, cx + (iconSize + gap) / 2f, cy - (fm.ascent + fm.descent) / 2f, text)
     }
 
     /** The mic while listening: accent colored, with a ring that grows when you talk. */
@@ -356,13 +406,14 @@ class ToolbarView(context: Context) : View(context) {
         return slot.shortcut ?: MIC.takeIf { voiceOn }  // Tap the voice status to stop.
     }
 
-    private fun hasSlot(i: Int) = i >= 0 && suggestions.getOrNull(i)?.isNotEmpty() == true
+    private fun hasSlot(i: Int) = if (showingClipboard) i == 0 else suggestions.getOrNull(i)?.isNotEmpty() == true
 
     private fun slotAt(x: Float): Int {
         if (!showingSuggestions) return -1
         updateSlots()
         val slot = textSlot ?: return -1
         if (x < slot.left || x >= slot.right - dp(2f)) return -1
+        if (showingClipboard) return 0
         val e = slotEdges(slot)
         return (0 until 3).firstOrNull { x < e[it + 1] } ?: 2
     }
@@ -387,7 +438,7 @@ class ToolbarView(context: Context) : View(context) {
                 if (pressed != null || hasSlot(pressedSlot)) {
                     feedback.keyDown(null, settings)
                 }
-                if (pressedSlot >= 0) handler.postDelayed(longPressRunnable, 500L)
+                if (pressedSlot >= 0 && !showingClipboard) handler.postDelayed(longPressRunnable, 500L)
                 invalidate()
             }
             MotionEvent.ACTION_UP -> {
@@ -399,7 +450,9 @@ class ToolbarView(context: Context) : View(context) {
                 invalidate()
                 if (longPressed) return true
                 if (slot >= 0) {
-                    if (slotAt(event.x) == slot && hasSlot(slot)) listener?.onSuggestion(slot)
+                    if (slotAt(event.x) == slot && hasSlot(slot)) {
+                        if (showingClipboard) listener?.onClipboardSuggestion() else listener?.onSuggestion(slot)
+                    }
                 } else {
                     val a = actionAt(event.x)
                     if (a != null && a == p) listener?.onToolbar(a)

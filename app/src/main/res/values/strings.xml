@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Yboard</string>
+    <item name="action_paste_clipboard" type="id" />
+    <string name="paste_clipboard_text">Paste clipboard text</string>
     <string name="send_helper_label">Yboard: tap Send for me</string>
     <string name="send_helper_description">When you say “send” while voice typing, Yboard taps the chat app’s Send button for you (WhatsApp’s Send button isn’t part of the keyboard). Yboard only looks for the Send button, only when you say “send”, and never saves or shares anything on your screen.</string>
 </resources>

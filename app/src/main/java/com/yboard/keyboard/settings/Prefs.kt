@@ -15,6 +15,7 @@ object Prefs {
     private const val FILE = "yboard"
     private const val KEY_SETTINGS = "settings"
     private const val KEY_CLIPS = "clips"
+    private const val KEY_PASTED_CLIP_TIMESTAMP = "pasted_clip_timestamp"
     private const val KEY_RECENT_EMOJI = "recent_emoji"
 
     private var sp: SharedPreferences? = null
@@ -63,6 +64,10 @@ object Prefs {
 
     fun clips() = loadList(KEY_CLIPS)
     fun saveClips(list: List<String>) = saveList(KEY_CLIPS, list)
+    var pastedClipTimestamp: Long
+        get() = sp?.getLong(KEY_PASTED_CLIP_TIMESTAMP, 0L) ?: 0L
+        set(value) { sp?.edit()?.putLong(KEY_PASTED_CLIP_TIMESTAMP, value)?.apply() }
+
     fun recentEmoji() = loadList(KEY_RECENT_EMOJI)
     fun saveRecentEmoji(list: List<String>) = saveList(KEY_RECENT_EMOJI, list)
 }
