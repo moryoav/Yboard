@@ -215,7 +215,7 @@ class ToolbarView(context: Context) : View(context) {
             when (val shortcut = slot.shortcut) {
                 null -> when {
                     voice != null -> drawVoiceStatus(canvas, voice, slot, cy)
-                    showingClipboard -> drawClipboardSuggestion(canvas, slot, cy)
+                    showingClipboard -> drawClipboardSuggestion(canvas, clipboardSlot(slot), cy)
                     else -> drawSuggestions(canvas, slot, cy)
                 }
                 MIC -> if (voice != null) drawVoiceMic(canvas, slot, cy) else drawIdleMic(canvas, slot, cy)
@@ -282,6 +282,15 @@ class ToolbarView(context: Context) : View(context) {
         val label = TextUtils.ellipsize(status, text, available, TextUtils.TruncateAt.END)
         val fm = text.fontMetrics
         canvas.drawText(label, 0, label.length, cx, cy - (fm.ascent + fm.descent) / 2f, text)
+    }
+
+    private fun clipboardSlot(slot: Slot): Slot {
+        // Aim for the toolbar midpoint while leaving enough room for a preview beside reordered shortcuts.
+        val minHalfWidth = dp(48f)
+        if (slot.width <= 2f * minHalfWidth) return slot
+        val center = (width / 2f).coerceIn(slot.left + minHalfWidth, slot.right - minHalfWidth)
+        val halfWidth = min(center - slot.left, slot.right - center)
+        return slot.copy(left = center - halfWidth, right = center + halfWidth)
     }
 
     private fun drawClipboardSuggestion(canvas: Canvas, slot: Slot, cy: Float) {
@@ -416,8 +425,11 @@ class ToolbarView(context: Context) : View(context) {
         if (!showingSuggestions) return -1
         updateSlots()
         val slot = textSlot ?: return -1
+        if (showingClipboard) {
+            val clip = clipboardSlot(slot)
+            return if (x >= clip.left + dp(2f) && x < clip.right - dp(2f)) 0 else -1
+        }
         if (x < slot.left || x >= slot.right - dp(2f)) return -1
-        if (showingClipboard) return 0
         val e = slotEdges(slot)
         return (0 until 3).firstOrNull { x < e[it + 1] } ?: 2
     }

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.17.3
+
+- Centered the clipboard paste preview above the keyboard.
+
 ## 1.17.2
 
 - Fixed inline autofill chips appearing as a blank row above the keyboard.
