@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.16.4
+
+- Removed the chat and keyboard previews from the main settings screen.
+- Kept the “Tap here to try Yboard” field visible above the keyboard when it opens.
+
 ## 1.16.3
 
 - Spaced all keyboard toolbar shortcuts evenly, including the microphone.

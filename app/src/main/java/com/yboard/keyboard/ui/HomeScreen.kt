@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -108,9 +109,10 @@ fun HomeScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
             .statusBarsPadding()
             .navigationBarsPadding()
+            .imePadding()
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp)
     ) {
         Spacer(Modifier.height(18.dp))
@@ -170,9 +172,6 @@ fun HomeScreen(
             Spacer(Modifier.height(14.dp))
         }
 
-        KeyboardPreview(settings, topSpace = 92.dp)
-
-        Spacer(Modifier.height(14.dp))
         var tryText by remember { mutableStateOf("") }
         OutlinedTextField(
             value = tryText,
