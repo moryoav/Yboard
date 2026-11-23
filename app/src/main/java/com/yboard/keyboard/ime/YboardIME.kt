@@ -199,9 +199,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     private val settingsListener: (YboardSettings) -> Unit = { s -> onSettingsChanged(s) }
     private val expireClipboardOffer = Runnable { dismissClipboardOffer() }
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
-        offeredClipTimestamp?.let {
-            if (clipboard?.primaryClipDescription?.timestamp != it) dismissClipboardOffer()
-        }
+        if (isInputViewShown) currentInputEditorInfo?.let(::offerClipboardText)
         captureClip()
     }
 
@@ -2005,8 +2003,10 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     }
 
     private fun offerClipboardText(info: EditorInfo) {
-        if (!canOfferClipboard(info)) return
-        val timestamp = clipboard?.primaryClipDescription?.timestamp ?: return
+        val timestamp = if (canOfferClipboard(info)) clipboard?.primaryClipDescription?.timestamp else null
+        if (timestamp == offeredClipTimestamp) return
+        dismissClipboardOffer()
+        if (timestamp == null) return
         val text = freshClipboardText(timestamp) ?: return
         val trimmed = text.trim()
         val preview = trimmed.take(CLIPBOARD_PREVIEW_LIMIT).trimEnd(Char::isHighSurrogate)

@@ -249,7 +249,7 @@ class KeyboardShots {
     @Test fun gold() = paparazzi.snapshot(board(YboardSettings(theme = ThemePresets.gold)))
     @Test fun voiceListening() {
         val frame = board(YboardSettings(theme = ThemePresets.dark)) as FrameLayout
-        (frame.getChildAt(0) as KeyboardRootView).toolbar.setVoice("Listening… tap the mic to stop", 0.7f, true)
+        (frame.getChildAt(0) as KeyboardRootView).toolbar.setVoice("Listening…", 0.7f, true)
         paparazzi.snapshot(frame)
     }
     @Test fun hebrewLight() = paparazzi.snapshot(board(YboardSettings(theme = ThemePresets.light, language = "he"), enter = EnterType.NEXT))

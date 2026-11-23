@@ -70,6 +70,7 @@ object VoiceRegression {
         lateinit var micListener: MicStream.Listener
         var micPending = false
         var micStopped = false
+        var status: String? = null
         val voice = VoiceTyping("synthetic-test-key", listOf("en", "he"), "en", smart, this,
             initialSelection = 0, services = object : VoiceServices() {
                 override val dispatcher = clock
@@ -113,7 +114,9 @@ object VoiceRegression {
                 }
             }).also { it.start() }
         override fun inputConnection() = editor
-        override fun onVoiceUi(status: String?, level: Float, listening: Boolean) {}
+        override fun onVoiceUi(status: String?, level: Float, listening: Boolean) {
+            this.status = status
+        }
         override fun showMessage(text: String) { messages.add(text) }
         override fun sendMessage(lastTry: Boolean): VoiceTyping.SendResult { sends++; return VoiceTyping.SendResult.ACTION }
         fun audio() { micPending = true; micListener.onAudio(ByteArray(24000) { 1 }) }
@@ -129,6 +132,12 @@ object VoiceRegression {
             val f = Fixture(context, smart)
             try { test(f); passed++ } finally { f.close() }
         }
+        scenario({ f ->
+            f.clock.advance()
+            check(f.status == "Listening…") { "Unexpected live listening status: ${f.status}" }
+            f.voice.onClosed("offline", 0); f.clock.advance()
+            check(f.status == "Listening…") { "Unexpected recorded listening status: ${f.status}" }
+        })
         scenario({ f ->
             f.phrase(); f.voice.onCommitted("one"); f.voice.stop(); f.clock.advance(5000)
             check(f.voice.isActive) { "Stop discarded the pending final transcript" }

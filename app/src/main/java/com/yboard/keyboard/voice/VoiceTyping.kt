@@ -792,8 +792,7 @@ class VoiceTyping(
             heard != null -> "“${heard.take(48)}”"
             !connected -> "Connecting…"
             phraseMode && phrases.isNotEmpty() -> "Transcribing recording…"
-            phraseMode -> "Listening… recorded phrases"
-            else -> "Listening… tap the mic to stop"
+            else -> "Listening…"
         }
         host.onVoiceUi(status, level, !stopping)
     }

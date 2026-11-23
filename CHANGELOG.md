@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.17.4
+
+- Showed the clipboard paste preview when text is copied while the keyboard is open.
+- Shortened the voice typing status to “Listening…”.
+
 ## 1.17.3
 
 - Centered the clipboard paste preview above the keyboard.
