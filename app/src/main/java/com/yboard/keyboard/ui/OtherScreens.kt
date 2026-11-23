@@ -31,7 +31,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.yboard.keyboard.settings.OneHanded
 import com.yboard.keyboard.settings.Prefs
-import com.yboard.keyboard.settings.ToolbarShortcut
 import com.yboard.keyboard.settings.YboardSettings
 import kotlin.math.roundToInt
 
@@ -84,7 +83,6 @@ fun TypingScreen(
     onLearnedWords: () -> Unit,
 ) {
     val context = LocalContext.current
-    val hasKey = remember { com.yboard.keyboard.voice.ApiKeyStore.get(context) != null }
     var confirmClear by remember { mutableStateOf(false) }
     ScreenScaffold("Typing", onBack) {
         LocalPredictionSection()
@@ -97,14 +95,6 @@ fun TypingScreen(
                 settings.nextWords, enabled = settings.suggestions,
             ) { b -> Prefs.update { it.copy(nextWords = b) } }
             HintText("Tap inside an earlier word to see replacements. Text shortcuts expand when you press space.")
-            SwitchRow(
-                "Emoji sprinkle button",
-                if (hasKey) "A ✨ button above the keys adds fitting emojis to your message. Uses your OpenAI key"
-                else "Needs your OpenAI key first (Yboard → Voice typing)",
-                ToolbarShortcut.SPRINKLE !in settings.toolbarShortcuts.hidden,
-            ) { visible ->
-                Prefs.update { it.copy(toolbarShortcuts = it.toolbarShortcuts.withVisibility(ToolbarShortcut.SPRINKLE, visible)) }
-            }
             NavRow(R.drawable.ic_text_fields, "Text shortcuts", "\"omw\" becomes \"On my way!\" — make your own") { onShortcuts() }
             NavRow(R.drawable.ic_book, "My words", myWordsSummary(settings)) { onMyWords() }
             SwitchRow(

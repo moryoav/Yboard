@@ -96,7 +96,7 @@ fun ToolbarScreen(settings: YboardSettings, onBack: () -> Unit) {
 @Composable
 private fun ToolbarShortcutRow(shortcut: ToolbarShortcut, index: Int, shortcuts: ToolbarShortcuts) {
     Row(
-        Modifier.fillMaxWidth().padding(start = 16.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
+        Modifier.fillMaxWidth().searchTarget(shortcut.label).padding(start = 16.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(

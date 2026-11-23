@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.16.1
+
+- Removed the duplicate Emoji sprinkle toggle from Typing. Find the control under Layout & size → Toolbar shortcuts.
+
 ## 1.16.0
 
 - Added a list of learned English and Hebrew words under Typing, with an option to remove individual words.

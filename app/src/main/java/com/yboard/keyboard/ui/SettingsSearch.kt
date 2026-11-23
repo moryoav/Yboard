@@ -29,6 +29,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import com.yboard.keyboard.R
+import com.yboard.keyboard.settings.ToolbarShortcut
 import kotlinx.coroutines.delay
 
 /**
@@ -85,6 +86,7 @@ object SettingsIndex {
         SettingEntry("Number hints", Screen.LAYOUT, "$LAYOUT › Keys", "numbers long press"),
         SettingEntry("Toolbar", Screen.LAYOUT, "$LAYOUT › Keys", "icons bar top"),
         SettingEntry("Toolbar shortcuts", Screen.TOOLBAR, LAYOUT, "icons order reorder hide show clipboard sticker emoji palette undo mic", null),
+        SettingEntry(ToolbarShortcut.SPRINKLE.label, Screen.TOOLBAR, "$LAYOUT › Toolbar shortcuts", "button sparkle ai add emojis ✨ אימוג'י"),
         SettingEntry(STICKERS_WITH_SUGGESTIONS, Screen.TOOLBAR, "Toolbar shortcuts › While typing", "sticker icon hide completions predictions"),
         SettingEntry("Hide Android's switch-keyboard button", Screen.LAYOUT, "$LAYOUT › Keys", "gboard globe switch bar bottom"),
         SettingEntry("One-handed mode", Screen.LAYOUT, LAYOUT, "one hand left right thumb small יד אחת"),
@@ -94,7 +96,6 @@ object SettingsIndex {
         SettingEntry("Local predictions", Screen.TYPING, TYPING, "qwen gemma llm ai offline download model typing swipe prediction context"),
         SettingEntry("AI models", Screen.AI_MODELS, "AI models", "model reasoning thinking effort prediction voice transcription", null),
         SettingEntry("AI usage & cost", Screen.AI_MODELS, "AI models › Usage & estimated cost", "tokens input output cached cost price day week month spending usage", "Usage & estimated cost"),
-        SettingEntry("Emoji sprinkle button", Screen.TYPING, "$TYPING › Suggestions", "emoji sprinkle sparkle ai add emojis ✨ אימוג'י"),
         SettingEntry("Text shortcuts", Screen.SHORTCUTS, TYPING, "shortcuts omw abbreviation expand קיצורים", null),
         SettingEntry("My words", Screen.MY_WORDS, TYPING, "dictionary names slang add word personal מילים מילון", null),
         SettingEntry("Learn my words", Screen.TYPING, "$TYPING › Suggestions", "learn names slang"),
