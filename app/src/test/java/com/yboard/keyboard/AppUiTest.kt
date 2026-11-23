@@ -27,6 +27,7 @@ class AppUiTest {
         assertTrue(SettingsIndex.search("trail").map { it.title }.containsAll(listOf("Trail thickness", "Trail color", "Show swipe trail")))
         assertTrue(SettingsIndex.search("sound").all { it.screen == Screen.SOUND || it.words.contains("sound") || it.title.contains("sound", true) })
         assertEquals(Screen.MY_WORDS, SettingsIndex.search("dictionary").first().screen)
+        assertEquals(Screen.LEARNED_WORDS, SettingsIndex.search("learned words").first().screen)
         assertEquals("Keyboard height", SettingsIndex.search("height").first().title)
         assertTrue(SettingsIndex.search("רקע").isNotEmpty())                // Hebrew words work too
         assertTrue(SettingsIndex.search("swipe color").any { it.title == "Trail color" })  // every word must match

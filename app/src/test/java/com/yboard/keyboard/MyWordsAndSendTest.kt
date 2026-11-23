@@ -149,6 +149,28 @@ class MyWordsAndSendTest {
     }
 
     @Test
+    fun learnedWordListIncludesSingleUsesAndRemovesOnlyTheSelectedEntry() {
+        UserWords.setMyWords(listOf("OnlyManual", "Zohar"))
+        val english = UserWords.inMemory("en")
+        val hebrew = UserWords.inMemory("he")
+        english.learn("Zohar", 2)
+        english.learn("avocado")
+        hebrew.learn("זוהר")
+
+        assertEquals(listOf("avocado", "Zohar"), english.learnedWords().map { it.spelling })
+        assertEquals(listOf("זוהר"), hebrew.learnedWords().map { it.spelling })
+
+        english.forget(english.learnedWords().last().normalized)
+        assertEquals(listOf("avocado"), english.learnedWords().map { it.spelling })
+        assertTrue(english.isMine("zohar"))
+        assertEquals(listOf("זוהר"), hebrew.learnedWords().map { it.spelling })
+
+        hebrew.forget(hebrew.learnedWords().single().normalized)
+        assertTrue(hebrew.learnedWords().isEmpty())
+        assertEquals(0, hebrew.count("זוהר"))
+    }
+
+    @Test
     fun everydayWordsKeepTheirSmallLetters() {
         UserWords.setMyWords(listOf("Apple"))
         val s = Suggester(en, UserWords.inMemory("en"), "en")

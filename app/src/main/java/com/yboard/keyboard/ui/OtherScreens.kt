@@ -76,7 +76,13 @@ fun LayoutScreen(settings: YboardSettings, onBack: () -> Unit, onToolbar: () -> 
 }
 
 @Composable
-fun TypingScreen(settings: YboardSettings, onBack: () -> Unit, onShortcuts: () -> Unit = {}, onMyWords: () -> Unit = {}) {
+fun TypingScreen(
+    settings: YboardSettings,
+    onBack: () -> Unit,
+    onShortcuts: () -> Unit = {},
+    onMyWords: () -> Unit = {},
+    onLearnedWords: () -> Unit,
+) {
     val context = LocalContext.current
     val hasKey = remember { com.yboard.keyboard.voice.ApiKeyStore.get(context) != null }
     var confirmClear by remember { mutableStateOf(false) }
@@ -105,6 +111,7 @@ fun TypingScreen(settings: YboardSettings, onBack: () -> Unit, onShortcuts: () -
                 "Learn my words", "Remember names and slang you type (stays on this phone)",
                 settings.learnWords, enabled = settings.suggestions,
             ) { b -> Prefs.update { it.copy(learnWords = b) } }
+            NavRow(R.drawable.ic_book, VIEW_LEARNED_WORDS, "Review and remove words in English and Hebrew", onLearnedWords)
             Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
                 OutlinedButton(onClick = { confirmClear = true }) {
                     Icon(painterResource(R.drawable.ic_delete), null, modifier = Modifier.size(18.dp))

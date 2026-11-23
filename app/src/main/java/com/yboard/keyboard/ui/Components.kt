@@ -65,6 +65,7 @@ fun ScreenScaffold(
     onBack: () -> Unit,
     preview: YboardSettings? = null,
     actions: @Composable RowScope.() -> Unit = {},
+    scrollContent: Boolean = true,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Scaffold(
@@ -86,14 +87,15 @@ fun ScreenScaffold(
             if (preview != null) {
                 KeyboardPreview(preview, Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
             }
+            val scrolling = if (scrollContent) Modifier.verticalScroll(rememberScrollState()) else Modifier
             Column(
                 Modifier
                     .weight(1f)
-                    .verticalScroll(rememberScrollState())
+                    .then(scrolling)
                     .padding(horizontal = 16.dp)
             ) {
                 content()
-                Spacer(Modifier.height(28.dp))
+                if (scrollContent) Spacer(Modifier.height(28.dp))
             }
         }
     }

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.16.0
+
+- Added a list of learned English and Hebrew words under Typing, with an option to remove individual words.
+
 ## 1.15.1
 
 - Removed cached update APKs for the installed version and older versions when opening Yboard.

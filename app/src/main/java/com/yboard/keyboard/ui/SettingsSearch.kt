@@ -98,6 +98,7 @@ object SettingsIndex {
         SettingEntry("Text shortcuts", Screen.SHORTCUTS, TYPING, "shortcuts omw abbreviation expand קיצורים", null),
         SettingEntry("My words", Screen.MY_WORDS, TYPING, "dictionary names slang add word personal מילים מילון", null),
         SettingEntry("Learn my words", Screen.TYPING, "$TYPING › Suggestions", "learn names slang"),
+        SettingEntry(VIEW_LEARNED_WORDS, Screen.LEARNED_WORDS, "$TYPING › Suggestions", "forget delete remove learned words מילים", null),
         SettingEntry("Email helpers", Screen.TYPING, "$TYPING › Email & passwords", "email @ .com gmail"),
         SettingEntry("Your email", Screen.TYPING, "$TYPING › Email & passwords", "email address gmail מייל", "Email helpers"),
         SettingEntry("Passwords & codes", Screen.TYPING, "$TYPING › Email & passwords", "autofill password login sms code otp סיסמה"),

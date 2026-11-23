@@ -5,6 +5,8 @@ import android.content.SharedPreferences
 import android.os.Handler
 import android.os.Looper
 import org.json.JSONObject
+import java.text.Collator
+import java.util.Locale
 import kotlin.math.ln1p
 
 /**
@@ -13,6 +15,8 @@ import kotlin.math.ln1p
  * Stored only on the phone.
  */
 class UserWords private constructor(private val sp: SharedPreferences?, private val language: String) {
+
+    data class LearnedWord(val normalized: String, val spelling: String)
 
     private class Entry(var spelling: String, var count: Int)
 
@@ -66,8 +70,16 @@ class UserWords private constructor(private val sp: SharedPreferences?, private 
         (mine().values.take(n) + words.values.filter { it.count >= KNOWN_AT }.sortedByDescending { it.count }.map { it.spelling })
             .distinctBy { Dictionary.normalize(it) }.take(n)
 
+    fun learnedWords(): List<LearnedWord> {
+        val collator = Collator.getInstance(Locale.forLanguageTag(language))
+        return words.map { (norm, entry) -> LearnedWord(norm, entry.spelling) }
+            .sortedWith { first, second -> collator.compare(first.spelling, second.spelling) }
+    }
+
     fun forget(norm: String) {
-        if (words.remove(norm) != null) { revision++; scheduleSave() }
+        if (words.remove(norm) == null) return
+        revision++
+        save()
     }
 
     fun clear() {
@@ -115,10 +127,15 @@ class UserWords private constructor(private val sp: SharedPreferences?, private 
         savePending = true
         handler.postDelayed({
             savePending = false
-            val o = JSONObject()
-            words.forEach { (norm, e) -> o.put(norm, org.json.JSONArray().put(e.spelling).put(e.count)) }
-            sp.edit().putString(language, o.toString()).apply()
+            save()
         }, 3000L)
+    }
+
+    private fun save() {
+        val prefs = sp ?: return
+        val o = JSONObject()
+        words.forEach { (norm, e) -> o.put(norm, org.json.JSONArray().put(e.spelling).put(e.count)) }
+        prefs.edit().putString(language, o.toString()).apply()
     }
 
     companion object {
