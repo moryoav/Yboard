@@ -1,7 +1,11 @@
 package com.yboard.keyboard.voice
 
 enum class TranscriptionQuality(val delay: String, val label: String) {
-    FASTER("low", "Faster"), BALANCED("medium", "Balanced"), ACCURATE("high", "More accurate"),
+    FASTEST("minimal", "Fastest"),
+    FASTER("low", "Faster"),
+    BALANCED("medium", "Balanced"),
+    ACCURATE("high", "More accurate"),
+    MOST_ACCURATE("xhigh", "Most accurate"),
 }
 
 data class VoiceOptions(

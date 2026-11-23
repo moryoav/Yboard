@@ -229,13 +229,15 @@ fun VoiceScreen(settings: YboardSettings, onBack: () -> Unit) {
         }
 
         Section("Listening preferences", searchable = true) {
-            ChipRow("Transcription", TranscriptionQuality.entries.map { it.label }, settings.voiceQuality.ordinal) { i ->
+            ChipRow("Transcription", TranscriptionQuality.entries.map { it.label }, settings.voiceQuality.ordinal, wrap = true) { i ->
                 Prefs.update { it.copy(voiceQuality = TranscriptionQuality.entries[i]) }
             }
             HintText(when (settings.voiceQuality) {
+                TranscriptionQuality.FASTEST -> "Shows words as soon as possible, with the least audio context."
                 TranscriptionQuality.FASTER -> "Words appear sooner, with less audio context."
                 TranscriptionQuality.BALANCED -> "Balances quick results with more context for accuracy."
                 TranscriptionQuality.ACCURATE -> "Waits for more audio context. Words may take longer to appear."
+                TranscriptionQuality.MOST_ACCURATE -> "Waits for the most audio context before showing words."
             })
             if (settings.voiceCommands) {
                 SliderRow("Voice command pause", settings.voicePauseMs.toFloat(), 250f..1500f,

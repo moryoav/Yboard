@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -288,20 +290,23 @@ fun SegmentRow(title: String?, options: List<String>, selected: Int, onSelect: (
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun ChipRow(title: String, options: List<String>, selected: Int, onSelect: (Int) -> Unit) {
+fun ChipRow(title: String, options: List<String>, selected: Int, wrap: Boolean = false, onSelect: (Int) -> Unit) {
     Column(Modifier.fillMaxWidth().searchTarget(title).padding(vertical = 10.dp)) {
         Text(title, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(horizontal = 20.dp))
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
+        val chips: @Composable () -> Unit = {
             options.forEachIndexed { i, label ->
                 FilterChip(selected = i == selected, onClick = { onSelect(i) }, label = { Text(label) })
             }
+        }
+        val padding = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+        val spacing = Arrangement.spacedBy(8.dp)
+        if (wrap) {
+            FlowRow(Modifier.fillMaxWidth().then(padding), horizontalArrangement = spacing) { chips() }
+        } else {
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).then(padding),
+                horizontalArrangement = spacing) { chips() }
         }
     }
 }

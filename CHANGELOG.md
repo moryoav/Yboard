@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.16.5
+
+- Added Fastest and Most accurate options for live transcription under Voice typing → Listening preferences.
+
 ## 1.16.4
 
 - Removed the chat and keyboard previews from the main settings screen.

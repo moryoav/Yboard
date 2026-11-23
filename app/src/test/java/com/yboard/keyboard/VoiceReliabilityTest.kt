@@ -31,10 +31,13 @@ class VoiceReliabilityTest {
     }
 
     @Test fun qualityActuallyReachesRealtimeConfiguration() {
-        for (quality in TranscriptionQuality.entries) {
-            val config = JSONObject(OpenAi.liveSessionJson(listOf("he", "en"), 0, model = "gpt-live-transcribe", delay = quality.delay))
+        val expectedDelays = listOf("minimal", "low", "medium", "high", "xhigh")
+        assertEquals(expectedDelays, TranscriptionQuality.entries.map { it.delay })
+        for ((quality, expectedDelay) in TranscriptionQuality.entries.zip(expectedDelays)) {
+            val settings = YboardSettings.fromJson(YboardSettings(voiceQuality = quality).toJson())
+            val config = JSONObject(OpenAi.liveSessionJson(listOf("he", "en"), 0, model = "gpt-live-transcribe", delay = settings.voiceOptions.quality.delay))
             val transcription = config.getJSONObject("session").getJSONObject("audio").getJSONObject("input").getJSONObject("transcription")
-            assertEquals(quality.delay, transcription.getString("delay"))
+            assertEquals(expectedDelay, transcription.getString("delay"))
             assertEquals(2, transcription.getJSONArray("languages").length())
         }
     }
