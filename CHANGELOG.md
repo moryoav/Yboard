@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.17.1
+
+- Centered the Connecting and Listening messages in the voice typing toolbar.
+
 ## 1.17.0
 
 - Added a paste suggestion when the keyboard opens within two minutes of copying text. Tap the preview to paste the full text.

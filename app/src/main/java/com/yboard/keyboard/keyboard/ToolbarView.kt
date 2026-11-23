@@ -271,13 +271,17 @@ class ToolbarView(context: Context) : View(context) {
     }
 
     private fun drawVoiceStatus(canvas: Canvas, status: String, slot: Slot, cy: Float) {
+        val cx = width / 2f
+        // Keep equal room on both sides of the toolbar center, inside the button slots.
+        val available = 2f * min(cx - slot.left, slot.right - cx) - dp(10f)
+        if (available <= 0f) return
         val t = settings.theme
         text.typeface = Fonts.medium(context)
         text.textSize = dp(15f)
         text.color = ThemeRender.withAlpha(t.textColor, 0.85f)
-        val label = ellipsize(status, slot.width - dp(10f))
+        val label = TextUtils.ellipsize(status, text, available, TextUtils.TruncateAt.END)
         val fm = text.fontMetrics
-        canvas.drawText(label, (slot.left + slot.right - dp(2f)) / 2f, cy - (fm.ascent + fm.descent) / 2f, text)
+        canvas.drawText(label, 0, label.length, cx, cy - (fm.ascent + fm.descent) / 2f, text)
     }
 
     private fun drawClipboardSuggestion(canvas: Canvas, slot: Slot, cy: Float) {
