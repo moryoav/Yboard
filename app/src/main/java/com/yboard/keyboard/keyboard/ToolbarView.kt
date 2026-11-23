@@ -114,8 +114,14 @@ class ToolbarView(context: Context) : View(context) {
         setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), dp(46f).roundToInt())
     }
 
-    private data class Slot(val shortcut: ToolbarShortcut?, val left: Float, val right: Float) {
+    private data class Slot(
+        val shortcut: ToolbarShortcut?,
+        val left: Float,
+        val right: Float,
+        private val iconCenterFraction: Float = 0.5f,
+    ) {
         val width: Float get() = right - left
+        val iconCenter: Float get() = left + width * iconCenterFraction
     }
 
     private val micR get() = dp(19f)
@@ -137,35 +143,37 @@ class ToolbarView(context: Context) : View(context) {
         laidOutVoice = voiceOn
         laidOutSuggestions = suggest
 
-        val items: List<ToolbarShortcut?> = when {
-            voiceOn -> buildList {
-                if (MENU in shortcuts) add(MENU)
-                add(null)
-                add(MIC)
+        if (!voiceOn && !suggest) {
+            val count = shortcuts.size.toFloat()
+            slots = shortcuts.mapIndexed { index, shortcut ->
+                Slot(shortcut, width * index / count, width * (index + 1) / count)
             }
-            suggest -> buildList {
-                // Suggestions go where the first shortcut that they replace used to be.
-                val keeps = settings.toolbarShortcuts::keepsDuringSuggestions
-                val firstReplaced = shortcuts.indexOfFirst { !keeps(it) }
-                val split = if (firstReplaced >= 0) firstReplaced else if (shortcuts.firstOrNull() == MENU) 1 else 0
-                addAll(shortcuts.take(split))
-                add(null)
-                addAll(shortcuts.drop(split).filter(keeps))
-            }
-            else -> shortcuts
+            textSlot = null
+            return
         }
-        val ordinaryCount = shortcuts.count { it != MIC && it != STICKER }
+
+        val items = if (voiceOn) buildList {
+            if (MENU in shortcuts) add(MENU)
+            add(null)
+            add(MIC)
+        } else buildList {
+            // Suggestions go where the first shortcut that they replace used to be.
+            val keeps = settings.toolbarShortcuts::keepsDuringSuggestions
+            val firstReplaced = shortcuts.indexOfFirst { !keeps(it) }
+            val split = if (firstReplaced >= 0) firstReplaced else if (shortcuts.firstOrNull() == MENU) 1 else 0
+            addAll(shortcuts.take(split))
+            add(null)
+            addAll(shortcuts.drop(split).filter(keeps))
+        }
+        val flexibleCount = shortcuts.count { it != MIC && it != STICKER }.coerceAtLeast(3)
         val reserved = (if (MIC in items) dp(54f) else 0f) + (if (STICKER in items) dp(46f) else 0f)
-        val flexibleCount = if (voiceOn || suggest) maxOf(ordinaryCount, 3) else ordinaryCount
-        // Keep the larger sticker and mic circles at normal widths, and make room for
-        // the other shortcuts on narrow keyboards when many are enabled.
         val fixedScale = if (reserved > 0f) {
             min(1f, (width - dp(28f) * flexibleCount).coerceAtLeast(width / 2f) / reserved)
         } else 1f
         val freeWidth = width - reserved * fixedScale
-        val ordinaryWidth = freeWidth / flexibleCount.coerceAtLeast(1)
+        val ordinaryWidth = freeWidth / flexibleCount
         val textWidth = freeWidth - if (MENU in items) ordinaryWidth else 0f
-        var left = if (!voiceOn && !suggest && ordinaryCount == 0) freeWidth / 2f else 0f
+        var left = 0f
         slots = items.map { shortcut ->
             val slotWidth = when (shortcut) {
                 MIC -> dp(54f) * fixedScale
@@ -173,15 +181,14 @@ class ToolbarView(context: Context) : View(context) {
                 null -> textWidth
                 else -> ordinaryWidth
             }
-            Slot(shortcut, left, left + slotWidth).also { left = it.right }
+            val iconCenterFraction = when (shortcut) {
+                MIC -> 25f / 54f
+                STICKER -> 25f / 46f
+                else -> 0.5f
+            }
+            Slot(shortcut, left, left + slotWidth, iconCenterFraction).also { left = it.right }
         }
         textSlot = slots.firstOrNull { it.shortcut == null }
-    }
-
-    private fun Slot.iconCenter(): Float = left + when (shortcut) {
-        MIC -> width * (25f / 54f)
-        STICKER -> width * (25f / 46f)
-        else -> width / 2f
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -199,7 +206,7 @@ class ToolbarView(context: Context) : View(context) {
 
     private fun drawIdleMic(canvas: Canvas, slot: Slot, cy: Float) {
         val t = settings.theme
-        val cx = slot.iconCenter()
+        val cx = slot.iconCenter
         val radius = min(micR, slot.width / 2f)
         // Same look as the keys (see-through on see-through themes), like Gboard.
         paint.color = ThemeRender.withAlpha(t.keyColor, if (t.keyOpacity < 0.5f) min(t.keyOpacity * 1.4f, 0.5f) else t.keyOpacity)
@@ -247,7 +254,7 @@ class ToolbarView(context: Context) : View(context) {
     /** The mic while listening: accent colored, with a ring that grows when you talk. */
     private fun drawVoiceMic(canvas: Canvas, slot: Slot, cy: Float) {
         val t = settings.theme
-        val cx = slot.iconCenter()
+        val cx = slot.iconCenter
         val radius = min(micR, slot.width / 2f)
         if (voiceListening) {
             paint.color = ThemeRender.withAlpha(t.accentColor, 0.28f)
@@ -260,7 +267,7 @@ class ToolbarView(context: Context) : View(context) {
 
     private fun drawToolIcon(canvas: Canvas, slot: Slot, shortcut: ToolbarShortcut, cy: Float) {
         val t = settings.theme
-        val cx = slot.iconCenter()
+        val cx = slot.iconCenter
         val radius = min(micR, slot.width / 2f)
         val isActive = shortcut == active
         if (isActive) {

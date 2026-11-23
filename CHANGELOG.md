@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.16.3
+
+- Spaced all keyboard toolbar shortcuts evenly, including the microphone.
+
 ## 1.16.2
 
 - Removed the duplicate Local predictions controls from Typing. Manage local models in AI models.
