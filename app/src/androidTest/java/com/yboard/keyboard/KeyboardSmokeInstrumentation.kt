@@ -4,6 +4,9 @@ import android.app.Activity
 import android.app.Instrumentation
 import android.os.Bundle
 import android.os.SystemClock
+import android.view.View
+import android.view.ViewGroup
+import com.yboard.keyboard.keyboard.KeyboardRootView
 import com.yboard.keyboard.settings.Prefs
 import com.yboard.keyboard.voice.ApiKeyStore
 import com.yboard.keyboard.voice.OpenAi
@@ -39,6 +42,11 @@ class KeyboardSmokeInstrumentation : Instrumentation() {
                 result.putString("result", PredictionImeChecks(this).glideBenchmark())
             } else if (mode == "prediction_ime") {
                 result.putString("result", PredictionImeChecks(this).run())
+            } else if (mode == "autofill_bar") {
+                var failure: Throwable? = null
+                runOnMainSync { try { checkAutofillBar() } catch (error: Throwable) { failure = error } }
+                failure?.let { throw it }
+                result.putString("result", "Inline chip dimensions, pinned chips and empty toolbar fallback passed")
             } else if (mode == "update_notifications") {
                 result.putString("result", UpdateNotificationChecks(this).run(args.getString("scenario").orEmpty()))
             } else if (mode == "sticker_local") {
@@ -96,5 +104,35 @@ class KeyboardSmokeInstrumentation : Instrumentation() {
             result.putString("error", "${e.javaClass.simpleName}: ${e.message}; ${e.stackTrace.firstOrNull { it.className.startsWith("com.yboard") }}")
             finish(Activity.RESULT_CANCELED, result)
         }
+    }
+
+    private fun checkAutofillBar() {
+        val root = KeyboardRootView(targetContext, preview = true)
+        fun chip(width: Int, height: Int) = View(targetContext).apply {
+            layoutParams = ViewGroup.LayoutParams(width, height)
+        }
+        fun layout() {
+            root.measure(
+                View.MeasureSpec.makeMeasureSpec(1080, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+            )
+            root.layout(0, 0, root.measuredWidth, root.measuredHeight)
+        }
+
+        val login = chip(224, 72)
+        val pinned = chip(90, 72)
+        root.showAutofill(listOf(login), listOf(pinned))
+        layout()
+        check(root.toolbar.visibility == View.GONE && root.autofillBar.visibility == View.VISIBLE)
+        check(login.width == 224 && login.height == 72) { "Scrolling chip measured ${login.width} × ${login.height}" }
+        check(pinned.width == 90 && pinned.height == 72) { "Pinned chip measured ${pinned.width} × ${pinned.height}" }
+
+        root.showAutofill(listOf(chip(0, 72), chip(224, 72).apply { visibility = View.INVISIBLE }), listOf(chip(90, 0)))
+        layout()
+        check(root.toolbar.visibility == View.VISIBLE && root.autofillBar.visibility == View.GONE)
+
+        root.showAutofill(listOf(login), emptyList())
+        root.showAutofill(emptyList(), emptyList())
+        check(root.toolbar.visibility == View.VISIBLE && root.autofillBar.visibility == View.GONE)
     }
 }

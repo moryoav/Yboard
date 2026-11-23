@@ -3,6 +3,7 @@ package com.yboard.keyboard.keyboard
 import android.content.Context
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import kotlin.math.roundToInt
@@ -45,9 +46,18 @@ class AutofillBar(context: Context) : LinearLayout(context) {
     fun setChips(chips: List<View>, pinned: List<View>) {
         row.removeAllViews()
         pinnedRow.removeAllViews()
-        fun lp() = LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(6f) }
-        chips.forEach { (it.parent as? android.view.ViewGroup)?.removeView(it); row.addView(it, lp()) }
-        pinned.forEach { (it.parent as? android.view.ViewGroup)?.removeView(it); pinnedRow.addView(it, lp()) }
+        fun addChips(container: LinearLayout, views: List<View>) {
+            for (chip in views) {
+                // InlineContentView has no intrinsic size. Keep the dimensions Android gives it.
+                val width = chip.layoutParams?.width ?: LayoutParams.WRAP_CONTENT
+                val height = chip.layoutParams?.height ?: LayoutParams.WRAP_CONTENT
+                if (width == 0 || height == 0 || chip.visibility != View.VISIBLE) continue
+                (chip.parent as? ViewGroup)?.removeView(chip)
+                container.addView(chip, LayoutParams(width, height).apply { marginEnd = dp(6f) })
+            }
+        }
+        addChips(row, chips)
+        addChips(pinnedRow, pinned)
         scroll.scrollTo(0, 0)
     }
 

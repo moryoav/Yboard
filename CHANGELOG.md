@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.17.2
+
+- Fixed inline autofill chips appearing as a blank row above the keyboard.
+- Kept the toolbar shortcuts visible when autofill provides only empty chips.
+
 ## 1.17.1
 
 - Centered the Connecting and Listening messages in the voice typing toolbar.
