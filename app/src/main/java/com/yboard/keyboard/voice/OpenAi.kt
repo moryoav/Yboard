@@ -33,14 +33,12 @@ object OpenAi {
     private const val TAG = "YboardVoice"
 
     private const val SPEECH_PROMPT =
-        "Verbatim phone dictation in English and Hebrew, never in any other language. Add punctuation automatically, " +
+        "Add punctuation automatically, " +
             "even when the speaker does not name it. Use the meaning of the words to place commas and sentence breaks. " +
             "Use commas for lists and introductory clauses, periods after complete statements, and question marks after questions. " +
             "Keep a sentence together through hesitations and audio cuts when the words continue the same thought. " +
             "Decide whether a thought is complete from the words, including words that follow a hesitation. " +
-            "Capitalize sentence starts, names, acronyms, and I. Continue a mid-sentence fragment in lowercase. Follow this style: " +
-            "I sent the message using voice typing. If it rains, I'll stay home. I bought milk, bread, and eggs. Are you coming? " +
-            "אם ירד גשם, אשאר בבית. קניתי חלב, לחם וביצים. אתה מגיע? " +
+            "Capitalize sentence starts, names, acronyms, and I. Continue a mid-sentence fragment in lowercase. " +
             "Keep spoken editing commands and punctuation names as words, such as new line, delete that, " +
             "scratch that, send, question mark, comma, and period."
 
@@ -58,11 +56,26 @@ object OpenAi {
      * The speech prompt, plus your own words so names are spelled the way you spell them, and their
      * English / Hebrew spellings ([pairs]) so a name comes out in the language you're speaking.
      */
-    fun speechPrompt(vocabulary: List<String>, pairs: List<Pair<String, String>> = emptyList()): String {
-        val sb = StringBuilder(SPEECH_PROMPT)
-        val words = vocabulary.take(MAX_VOCABULARY)
+    fun speechPrompt(
+        vocabulary: List<String>,
+        pairs: List<Pair<String, String>> = emptyList(),
+        languages: List<String> = listOf("en", "he"),
+    ): String {
+        val language = when (languages.singleOrNull()) {
+            "en" -> "English"
+            "he" -> "Hebrew"
+            else -> "English and Hebrew"
+        }
+        val sb = StringBuilder("Verbatim phone dictation in $language, never in any other language. $SPEECH_PROMPT")
+        sb.append(" Follow this style:")
+        if ("en" in languages) sb.append(" If it rains, I'll stay home. I bought milk, bread, and eggs. Are you coming?")
+        if ("he" in languages) sb.append(" אם ירד גשם, אשאר בבית. קניתי חלב, לחם וביצים. אתה מגיע?")
+        val words = if (languages.size == 1) {
+            (vocabulary + pairs.flatMap { listOf(it.first, it.second) }).distinct()
+                .filterNot { Scripts.hasDisallowed(it, languages) }.take(MAX_VOCABULARY)
+        } else vocabulary.take(MAX_VOCABULARY)
         if (words.isNotEmpty()) sb.append(" Names and words this person uses (spell them exactly like this): ${words.joinToString(", ")}.")
-        val p = pairs.take(MAX_VOCABULARY)
+        val p = if (languages.size == 1) emptyList() else pairs.take(MAX_VOCABULARY)
         if (p.isNotEmpty()) {
             sb.append(" The same names in English and Hebrew: ${p.joinToString(", ") { "${it.first} = ${it.second}" }}.")
             sb.append(" In a Hebrew sentence write them in Hebrew letters; in an English sentence, in English letters.")
@@ -158,10 +171,10 @@ object OpenAi {
     ): String {
         val transcription = JSONObject().put("model", model)
         if (level <= 2) transcription.put("languages", JSONArray(languages))
-        if (level <= 1) transcription.put("prompt", speechPrompt(vocabulary, pairs))
+        if (level <= 1) transcription.put("prompt", speechPrompt(vocabulary, pairs, languages))
         if (level == 0) {
             transcription.put("delay", delay)
-            transcription.put("keywords", JSONArray(speechKeywords(vocabulary, pairs)))
+            transcription.put("keywords", JSONArray(speechKeywords(vocabulary, pairs).filterNot { Scripts.hasDisallowed(it, languages) }))
         }
         val input = JSONObject()
             .put("format", JSONObject().put("type", "audio/pcm").put("rate", SAMPLE_RATE))
@@ -192,9 +205,10 @@ object OpenAi {
             .addFormDataPart("file", "speech.wav", wav.toRequestBody("audio/wav".toMediaType()))
             .addFormDataPart("model", model)
             .addFormDataPart("response_format", "json")
-            .addFormDataPart("prompt", (only + speechPrompt(vocabulary, pairs) + " " + context.takeLast(200)).trim())
+            .addFormDataPart("prompt", (only + speechPrompt(vocabulary, pairs, languages) + " " + context.takeLast(200)).trim())
         languages.forEach { body.addFormDataPart("languages[]", it) }
-        speechKeywords(vocabulary, pairs).forEach { body.addFormDataPart("keywords[]", it) }
+        speechKeywords(vocabulary, pairs).filterNot { Scripts.hasDisallowed(it, languages) }
+            .forEach { body.addFormDataPart("keywords[]", it) }
         val req = Request.Builder().url("$API/audio/transcriptions")
             .header("Authorization", "Bearer $key")
             .post(body.build())

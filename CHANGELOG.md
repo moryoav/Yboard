@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.17.6
+
+- Fixed voice typing leaving close misspellings of saved My words entries in the same alphabet.
+- Enforced the selected voice typing languages in live previews and final text, with a retry when another language is detected.
+
 ## 1.17.5
 
 - Fixed learned words keeping credit for a typo after you edit it or choose a correction.

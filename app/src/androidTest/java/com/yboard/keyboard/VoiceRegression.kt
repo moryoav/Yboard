@@ -8,6 +8,8 @@ import android.view.View
 import android.view.inputmethod.BaseInputConnection
 import android.view.inputmethod.ExtractedText
 import android.view.inputmethod.ExtractedTextRequest
+import com.yboard.keyboard.text.Dictionary
+import com.yboard.keyboard.text.MyWords
 import com.yboard.keyboard.voice.*
 import java.util.concurrent.AbstractExecutorService
 import java.util.concurrent.TimeUnit
@@ -56,13 +58,19 @@ object VoiceRegression {
             it.selectionEnd = Selection.getSelectionEnd(content); it.startOffset = 0
         }
     }
-    private class Fixture(context: Context, smart: Boolean = true) : VoiceTyping.Host {
+    private class Fixture(
+        context: Context,
+        smart: Boolean = true,
+        namePairs: List<Pair<String, String>> = emptyList(),
+        languages: List<String> = listOf("en", "he"),
+    ) : VoiceTyping.Host {
         val clock = Clock()
         val editor = Editor(context)
         val messages = ArrayList<String>()
         val results = ArrayDeque<Any>()
         var fileCalls = 0
         val recordingContexts = ArrayList<String>()
+        val recordingLanguages = ArrayList<List<String>>()
         var sends = 0
         var commandCalls = 0
         val commits = ArrayList<String>()
@@ -71,7 +79,9 @@ object VoiceRegression {
         var micPending = false
         var micStopped = false
         var status: String? = null
-        val voice = VoiceTyping("synthetic-test-key", listOf("en", "he"), "en", smart, this,
+        private val hebrewDictionary by lazy { checkNotNull(Dictionary.load(context, "he")) }
+        val voice = VoiceTyping("synthetic-test-key", languages, "en", smart, this,
+            vocabulary = namePairs.flatMap { listOf(it.first, it.second) }, namePairs = namePairs,
             initialSelection = 0, services = object : VoiceServices() {
                 override val dispatcher = clock
                 override val worker = DirectWorker()
@@ -104,6 +114,7 @@ object VoiceRegression {
                                         vocabulary: List<String>, pairs: List<Pair<String, String>>, onlyLanguage: String?): String {
                     fileCalls++
                     recordingContexts.add(context)
+                    recordingLanguages.add(languages)
                     check(wav.size > 44)
                     val result = results.removeFirst()
                     if (result is Throwable) throw result
@@ -119,6 +130,8 @@ object VoiceRegression {
         }
         override fun showMessage(text: String) { messages.add(text) }
         override fun sendMessage(lastTry: Boolean): VoiceTyping.SendResult { sends++; return VoiceTyping.SendResult.ACTION }
+        override fun isDictionaryWord(word: String): Boolean? =
+            if (MyWords.languageOf(word) == "he") hebrewDictionary.contains(Dictionary.normalize(word)) else null
         fun audio() { micPending = true; micListener.onAudio(ByteArray(24000) { 1 }) }
         fun phrase() { audio(); micPending = false; micListener.onPhraseEnd(); clock.advance() }
         fun finish(id: String, words: String) { voice.onCommitted(id); voice.onCompleted(id, words); clock.advance() }
@@ -128,8 +141,13 @@ object VoiceRegression {
 
     fun run(context: Context): Int {
         var passed = 0
-        fun scenario(test: (Fixture) -> Unit, smart: Boolean = true) {
-            val f = Fixture(context, smart)
+        fun scenario(
+            test: (Fixture) -> Unit,
+            smart: Boolean = true,
+            namePairs: List<Pair<String, String>> = emptyList(),
+            languages: List<String> = listOf("en", "he"),
+        ) {
+            val f = Fixture(context, smart, namePairs, languages)
             try { test(f); passed++ } finally { f.close() }
         }
         scenario({ f ->
@@ -183,6 +201,40 @@ object VoiceRegression {
             f.voice.onClosed("offline", 0); f.clock.advance()
             check(f.fileCalls == 1 && f.text() == "אם ירד גשם, אשאר בבית.")
         }, smart = false)
+        scenario({ f ->
+            f.audio(); f.voice.onDelta("name", "הורלי.")
+            f.phrase(); f.finish("name", "הורלי.")
+            check(f.text() == "צורלי.") { f.text() }
+            f.phrase(); f.results.add("הורלי אמרה שזה ניצחון מורלי.")
+            f.voice.onClosed("offline", 0); f.clock.advance()
+            check(f.fileCalls == 1 && f.text() == "צורלי. צורלי אמרה שזה ניצחון מורלי.") { f.text() }
+        }, namePairs = listOf(checkNotNull(MyWords.parsePair("צורלי=Tzoreli"))))
+        scenario({ f ->
+            f.audio(); f.voice.onDelta("language", "שלום")
+            check(f.text() == "שלום")
+            f.voice.onDelta("language", " مرحبا")
+            check(f.text().isEmpty()) { f.text() }
+            f.phrase(); f.results.add("שלום מחר.")
+            f.finish("language", "שלום مرحبا.")
+            check(f.text() == "שלום מחר." && f.recordingLanguages == listOf(listOf("he"))) { f.text() }
+        })
+        scenario({ f ->
+            f.audio(); f.voice.onDelta("stop", "مرحبا")
+            check(f.text().isEmpty())
+            f.voice.end()
+            check(f.text().isEmpty())
+        })
+        scenario({ f ->
+            f.phrase(); f.results.add("שלום"); f.results.add("مرحبا")
+            f.voice.onClosed("offline", 0); f.clock.advance()
+            check(f.text().isEmpty() && f.recordingLanguages == listOf(listOf("en"), listOf("en"))) { f.text() }
+            f.results.add("Send مرحبا."); f.results.add("مرحبا."); f.phrase()
+            check(f.text() == "Send." && f.sends == 0) { f.text() }
+        }, languages = listOf("en"))
+        scenario({ f ->
+            f.phrase(); f.results.add("שלום"); f.finish("language", "Hello.")
+            check(f.text() == "שלום" && f.recordingLanguages == listOf(listOf("he"))) { f.text() }
+        }, languages = listOf("he"))
         scenario({ f ->
             f.audio(); f.voice.onDelta("one", "I am sending this")
             check(f.pauseHints == listOf(0))

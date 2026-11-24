@@ -198,6 +198,8 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
             val n = Dictionary.normalize(word)
             return d.contains(n) || UserWords.get(this@YboardIME, "en").isKnown(n)
         }
+        override fun isDictionaryWord(word: String): Boolean? =
+            dictionaries[MyWords.languageOf(word)]?.contains(Dictionary.normalize(word))
     }
 
     private val settingsListener: (YboardSettings) -> Unit = { s -> onSettingsChanged(s) }
@@ -1897,6 +1899,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         root?.closePanel()
         clearStrip()
         clearAutofill()
+        settings.voiceLanguageList.forEach(::ensureDictionary)
         ensureNamePairs()
         android.util.Log.i("YboardVoice", "names: ${settings.myWordPairs.size} known in both languages")
         voice = VoiceTyping(

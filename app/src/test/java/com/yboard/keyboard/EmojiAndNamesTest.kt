@@ -20,25 +20,31 @@ class EmojiAndNamesTest {
 
     @Test
     fun otherAlphabetsAreCaught() {
-        assertFalse(Scripts.hasForeign("שלום, hello! 👋 123"))
-        assertTrue(Scripts.hasForeign("مرحبا"))
-        assertTrue(Scripts.hasForeign("Привет"))
-        assertEquals("hello world", Scripts.withoutForeign("hello مرحبا world"))
+        val both = listOf("he", "en")
+        assertFalse(Scripts.hasDisallowed("שָׁלוֹם, hello! 👋 123", both))
+        assertTrue(Scripts.hasDisallowed("مرحبا", both))
+        assertTrue(Scripts.hasDisallowed("Привет", both))
+        assertTrue(Scripts.hasDisallowed("Está bien", both))
+        assertTrue(Scripts.hasDisallowed("Esta\u0301 bien", both))
+        assertTrue(Scripts.hasDisallowed("١٢٣،", both))
+        assertTrue(Scripts.hasDisallowed("hello שלום", listOf("en")))
+        assertTrue(Scripts.hasDisallowed("שלום hello", listOf("he")))
+        assertEquals("שלום world", Scripts.withoutDisallowed("שלום،مرحبا\tworld", both))
+        assertEquals("hello world", Scripts.withoutDisallowed("hello abcمرحبا world", both))
+        assertEquals("", Scripts.withoutDisallowed("مرحبا.", both))
     }
 
     @Test
     fun otherLanguagesInEnglishLettersAreCaughtToo() {
         val english = setOf("hello", "how", "are", "you", "i", "met", "today", "see", "soon")
         val isEnglish: (String) -> Boolean? = { it.lowercase() in english }
-        assertTrue(Scripts.notHebrewOrEnglish("hola amigos como estas", isEnglish))
-        assertTrue(Scripts.notHebrewOrEnglish("Está bien", isEnglish))          // accents
-        assertTrue(Scripts.notHebrewOrEnglish("مرحبا", isEnglish))
-        assertFalse(Scripts.notHebrewOrEnglish("Hello, how are you?", isEnglish))
-        assertFalse(Scripts.notHebrewOrEnglish("שלום מה נשמע", isEnglish))
-        assertFalse(Scripts.notHebrewOrEnglish("I met Shmulik today", isEnglish))  // names don't count
-        assertFalse(Scripts.notHebrewOrEnglish("see you yoavi", isEnglish, names = setOf("yoavi")))
-        assertFalse(Scripts.notHebrewOrEnglish("lol", isEnglish))                  // too short to tell
-        assertFalse(Scripts.notHebrewOrEnglish("hola amigos", { null }))           // no dictionary: can't tell
+        assertTrue(Scripts.looksLikeOtherLatinLanguage("hola amigos como estas", isEnglish))
+        assertFalse(Scripts.looksLikeOtherLatinLanguage("Hello, how are you?", isEnglish))
+        assertFalse(Scripts.looksLikeOtherLatinLanguage("שלום מה נשמע", isEnglish))
+        assertFalse(Scripts.looksLikeOtherLatinLanguage("I met Shmulik today", isEnglish))  // names don't count
+        assertFalse(Scripts.looksLikeOtherLatinLanguage("see you yoavi", isEnglish, names = setOf("yoavi")))
+        assertFalse(Scripts.looksLikeOtherLatinLanguage("lol", isEnglish))                  // too short to tell
+        assertFalse(Scripts.looksLikeOtherLatinLanguage("hola amigos", { null }))           // no dictionary: can't tell
     }
 
     @Test
@@ -53,6 +59,10 @@ class EmojiAndNamesTest {
         assertFalse(t(1).has("keywords")); assertTrue(t(1).has("prompt")); assertTrue(t(1).has("languages"))
         assertFalse(t(2).has("prompt")); assertTrue(t(2).has("languages"))
         assertFalse(t(OpenAi.LAST_SESSION_LEVEL).has("languages"))
+        val onlyHebrew = OpenAi.speechPrompt(listOf("Yoav"), pairs, languages = listOf("he"))
+        assertTrue(onlyHebrew.startsWith("Verbatim phone dictation in Hebrew, never in any other language."))
+        assertTrue(onlyHebrew.contains("יואב"))
+        assertFalse(onlyHebrew.contains("Yoav"))
     }
 
     // ------------------------------------------------------------ emojis
@@ -100,6 +110,20 @@ class EmojiAndNamesTest {
         assertEquals("I'm with Yoav", NameSpelling.fix("I'm with יואבב", pairs, hebrewByDefault = true))
         // ...but ordinary words are left alone.
         assertEquals("I'm with you", NameSpelling.fix("I'm with you", pairs, hebrewByDefault = true))
+    }
+
+    @Test
+    fun repairsUniqueSameScriptMissesWithoutReplacingDictionaryWords() {
+        val pair = listOf("Tzoreli" to "צורלי")
+        val knownWord: (String) -> Boolean = { it == "מורלי" }
+        assertEquals("פגשתי את צורלי.", NameSpelling.fix(
+            "פגשתי את הורלי.", pair, hebrewByDefault = false, isDictionaryWord = knownWord,
+        ))
+        assertEquals("צורלי", NameSpelling.fix("הורלי", pair, hebrewByDefault = false, isDictionaryWord = knownWord))
+        assertEquals("מורלי", NameSpelling.fix("מורלי", pair, hebrewByDefault = false, isDictionaryWord = knownWord))
+        assertEquals("צורלי", NameSpelling.fix("הורלי", emptyList(), true, listOf("צורלי"), knownWord))
+        assertEquals("הורלי", NameSpelling.fix("הורלי", emptyList(), true, listOf("צורלי", "אורלי"), knownWord))
+        assertEquals("הורלי", NameSpelling.fix("הורלי", pair, hebrewByDefault = true))
     }
 
     @Test

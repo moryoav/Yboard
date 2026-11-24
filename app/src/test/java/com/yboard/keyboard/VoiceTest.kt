@@ -226,11 +226,16 @@ class VoiceTest {
     }
 
     @Test
-    fun speechModelIsToldTheCommandWords() {
-        val live = JSONObject(OpenAi.liveSessionJson(listOf("en"), full = true))
-        val kw = live.getJSONObject("session").getJSONObject("audio").getJSONObject("input")
-            .getJSONObject("transcription").getJSONArray("keywords")
-        assertTrue((0 until kw.length()).map { kw.getString(it) }.containsAll(listOf("new line", "delete that", "שורה חדשה")))
+    fun speechModelIsToldTheCommandWordsInConfiguredLanguages() {
+        fun keywords(languages: List<String>): List<String> {
+            val live = JSONObject(OpenAi.liveSessionJson(languages, full = true))
+            val kw = live.getJSONObject("session").getJSONObject("audio").getJSONObject("input")
+                .getJSONObject("transcription").getJSONArray("keywords")
+            return (0 until kw.length()).map { kw.getString(it) }
+        }
+        assertTrue(keywords(listOf("en", "he")).containsAll(listOf("new line", "delete that", "שורה חדשה")))
+        assertFalse("שורה חדשה" in keywords(listOf("en")))
+        assertFalse("new line" in keywords(listOf("he")))
     }
 
     @Test

@@ -64,6 +64,8 @@ class VoiceTyping(
         fun onDictated(before: String, text: String) {}
         /** Whether [word] is English (from the dictionary), or null if that can't be told. */
         fun isEnglishWord(word: String): Boolean? = null
+        /** Whether [word] is in its bundled dictionary, or null while that dictionary is unavailable. */
+        fun isDictionaryWord(word: String): Boolean? = null
     }
 
     private val main = services.dispatcher
@@ -83,6 +85,7 @@ class VoiceTyping(
         val text = StringBuilder()
         var final: String? = null
         var done = false
+        var literal = false
         /** The phrase's recording (phrase-by-phrase mode), to ask again if it came back in another language. */
         var audio: ByteArray? = null
         var retried = false
@@ -91,7 +94,7 @@ class VoiceTyping(
         val shown: String get() = (final ?: text.toString()).trim()
     }
 
-    private var toldOnlyHebrewEnglish = false
+    private var toldLanguageSkipped = false
 
     private val phrases = LinkedHashMap<String, Phrase>()
     private val finishedIds = HashSet<String>()
@@ -259,8 +262,7 @@ class VoiceTyping(
         if (!isActive || phraseMode) return
         val p = if (turnId != null) commitPhrases[turnId] else phrases.values.firstOrNull { it.audio != null && !it.done }
         p ?: return
-        p.done = true
-        pump()
+        finishPhrase(p, p.shown)
     }
 
     private val firstWordsLogged = HashSet<String>()
@@ -271,7 +273,7 @@ class VoiceTyping(
         p.text.append(delta)
         // A delta from a turn we already committed must not affect the next mic phrase.
         if (smartCommands && !p.done && p.audio == null && p === phrases.values.lastOrNull()) {
-            val shown = p.shown
+            val shown = visiblePhrase(p)
             val command = LocalCommands.trailingEdit(shown)?.second ?: shown
             val quick = LocalCommands.quickEndFrames(command)
             val frames = when {
@@ -294,13 +296,22 @@ class VoiceTyping(
         (vocabulary + namePairs.flatMap { listOf(it.first, it.second) }).map { it.lowercase() }.toSet()
     }
 
-    /** A phrase's words arrived: use them, unless they're not Hebrew or English. */
+    private fun outsideVoiceLanguages(heard: String): Boolean =
+        Scripts.hasDisallowed(heard, languages) || Scripts.looksLikeOtherLatinLanguage(heard, host::isEnglishWord, myNames)
+
+    private fun visiblePhrase(p: Phrase): String =
+        p.shown.takeUnless { Scripts.hasDisallowed(it, languages) }.orEmpty()
+
     private fun finishPhrase(p: Phrase, heard: String) {
-        if (!isActive || p.done) return
-        if (heard.isNotBlank() && Scripts.notHebrewOrEnglish(heard, host::isEnglishWord, myNames)) {
-            askAgainInHebrewOrEnglish(p, heard)
+        if (!isActive || p.done || p.transcribing) return
+        if (heard.isNotBlank() && outsideVoiceLanguages(heard)) {
+            retryInConfiguredLanguages(p, heard)
             return
         }
+        completePhrase(p, heard)
+    }
+
+    private fun completePhrase(p: Phrase, heard: String) {
         p.final = heard
         p.done = true
         pump()
@@ -308,13 +319,12 @@ class VoiceTyping(
 
     /**
      * The speech model heard another language (Arabic, Russian...): send that phrase's recording again,
-     * allowing only Hebrew and English. If that still fails, the other-language words are dropped.
+     * using the configured languages. If that fails, keep only the allowed part of the original.
      */
-    private fun askAgainInHebrewOrEnglish(p: Phrase, heard: String) {
-        if (!isActive) return
+    private fun retryInConfiguredLanguages(p: Phrase, heard: String) {
         val audio = p.audio
         if (audio == null || p.retried || audio.size < OpenAi.SAMPLE_RATE * 2 / 4) {
-            dropOtherLanguage(p, heard, couldAsk = false)
+            dropOtherLanguage(p, heard)
             return
         }
         p.retried = true
@@ -322,50 +332,49 @@ class VoiceTyping(
         p.final = ""  // don't show the wrong words meanwhile
         // The language you're most likely speaking first (Arabic letters usually mean it was Hebrew).
         val first = if (Scripts.looksSemitic(heard) || hebrewNow()) "he" else "en"
-        val order = listOf(first, if (first == "he") "en" else "he").filter { it in languages }.ifEmpty { languages }
+        val order = languages.sortedBy { it != first }
         Log.i(TAG, "heard another language, asking again: $order")
         val context = text.toString()
         val wav = Wav.encode(audio, OpenAi.SAMPLE_RATE)
-        worker.execute {
-            var result: String? = null
-            var reached = false
-            for (lang in order) {
-                val r = runCatching {
-                    services.transcribe(apiKey, wav, listOf(lang), context, vocabulary, namePairs, onlyLanguage = lang)
-                }.getOrNull() ?: continue
-                reached = true
-                if (r.isNotBlank() && !Scripts.hasForeign(r) && !Scripts.hasAccents(r)) { result = r; break }
-            }
-            main.post {
-                if (!isActive) return@post
+        showComposing()
+        fun attempt(index: Int) {
+            val lang = order.getOrNull(index)
+            if (lang == null) {
                 p.transcribing = false
-                val ok = result
-                if (ok == null) {
-                    dropOtherLanguage(p, heard, couldAsk = reached)
-                } else {
-                    Log.i(TAG, "asked again: got Hebrew / English")
-                    p.final = ok
-                    p.done = true
-                    pump()
+                dropOtherLanguage(p, heard)
+                return
+            }
+            worker.execute {
+                val result = runCatching {
+                    services.transcribe(apiKey, wav, listOf(lang), context, vocabulary, namePairs, onlyLanguage = lang)
+                }.getOrNull()
+                main.post {
+                    if (!isActive) return@post
+                    if (result.isNullOrBlank() || outsideVoiceLanguages(result)) {
+                        attempt(index + 1)
+                    } else {
+                        Log.i(TAG, "asked again: got text in a configured language")
+                        p.transcribing = false
+                        completePhrase(p, result)
+                    }
                 }
             }
         }
+        attempt(0)
     }
 
-    /** The words really weren't Hebrew or English: leave them out (and say why, once). */
-    private fun dropOtherLanguage(p: Phrase, heard: String, couldAsk: Boolean) {
-        Log.i(TAG, "dropped words in another language")
-        p.final = when {
-            !couldAsk && !Scripts.hasForeign(heard) && !Scripts.hasAccents(heard) -> heard  // couldn't check: keep them
-            Scripts.hasAccents(heard) -> ""
-            else -> Scripts.withoutForeign(heard)
-        }
-        p.done = true
-        if (!toldOnlyHebrewEnglish && p.final != heard) {
-            toldOnlyHebrewEnglish = true
-            host.showMessage("Yboard types only Hebrew and English, so it skipped words in another language.")
-        }
-        pump()
+    private fun dropOtherLanguage(p: Phrase, heard: String) {
+        val safe = Scripts.withoutDisallowed(heard, languages).takeUnless(::outsideVoiceLanguages).orEmpty()
+        // Removing words could leave behind something that sounds like an editing or send command.
+        p.literal = true
+        notifyLanguageSkipped()
+        completePhrase(p, safe)
+    }
+
+    private fun notifyLanguageSkipped() {
+        if (toldLanguageSkipped) return
+        toldLanguageSkipped = true
+        host.showMessage("Yboard skipped words outside your voice typing languages.")
     }
 
     override fun onFailed(itemId: String?, message: String) {
@@ -406,7 +415,7 @@ class VoiceTyping(
     private fun transcribeRecording(p: Phrase) {
         if (!isActive || p.done || p.transcribing) return
         val pcm = p.audio ?: return
-        if (pcm.isEmpty()) { p.done = true; pump(); return }
+        if (pcm.isEmpty()) { finishPhrase(p, p.shown); return }
         p.transcribing = true
         p.watchdog++
         val context = text.toString()
@@ -445,7 +454,9 @@ class VoiceTyping(
             head.remoteId?.let { finishedIds.add(it) }
             commitPhrases.entries.removeAll { it.value === head }
             val spoken = head.shown
-            if (spoken.isNotEmpty()) handlePhrase(spoken)
+            if (spoken.isNotEmpty()) {
+                if (head.literal) insertDictation(VoiceEdits.attachPunctuation(spoken)) else handlePhrase(spoken)
+            }
         }
         showComposing()
         if (stopping) finishIfIdle()
@@ -686,7 +697,9 @@ class VoiceTyping(
 
     /** Is the text being dictated Hebrew? From the words before the cursor, else the keyboard's language. */
     private fun hebrewNow(): Boolean =
-        com.yboard.keyboard.text.NameSpelling.hebrewText(text.takeLast(80).toString()) ?: (keyboardLanguage == "he")
+        languages.singleOrNull()?.let { it == "he" }
+            ?: com.yboard.keyboard.text.NameSpelling.hebrewText(text.takeLast(80).toString())
+            ?: (keyboardLanguage == "he")
 
     private fun insertDictation(spoken: String) {
         val words = VoiceEdits.continuationCase(text.toString(), spoken, myNames)
@@ -695,11 +708,16 @@ class VoiceTyping(
 
     private fun apply(edit0: VoiceEdit, remember: Boolean) {
         // Your names in the language you're speaking ("Yoav" in English, "יואב" in Hebrew).
-        val edit = if (remember && namePairs.isNotEmpty()) {
-            val fixed = com.yboard.keyboard.text.NameSpelling.fix(edit0.insert, namePairs, hebrewNow())
-            if (fixed != edit0.insert) Log.i(TAG, "names: wrote your names in the language you're speaking")
-            edit0.copy(insert = fixed)
+        val edit = if (remember && (namePairs.isNotEmpty() || vocabulary.isNotEmpty())) {
+            val fixed = com.yboard.keyboard.text.NameSpelling.fix(
+                edit0.insert, namePairs, hebrewNow(), vocabulary, host::isDictionaryWord,
+            )
+            if (fixed == edit0.insert || Scripts.hasDisallowed(fixed, languages)) edit0 else edit0.copy(insert = fixed)
         } else edit0
+        if (Scripts.hasDisallowed(edit.insert, languages)) {
+            notifyLanguageSkipped()
+            return
+        }
         val ic = host.inputConnection() ?: return
         deletedAll = null
         val before = text.toString()
@@ -751,7 +769,7 @@ class VoiceTyping(
         val before = text.toString()
         val preview = buildString {
             for (p in phrases.values) {
-                val shown = LocalCommands.preview(VoiceEdits.attachPunctuation(p.shown), smartCommands) ?: continue
+                val shown = LocalCommands.preview(VoiceEdits.attachPunctuation(visiblePhrase(p)), smartCommands && !p.literal) ?: continue
                 val left = if (isEmpty()) before else toString()
                 val words = VoiceEdits.continuationCase(left, shown, myNames)
                 append(VoiceEdits.forInsert(left, words))
@@ -769,7 +787,8 @@ class VoiceTyping(
     private fun heardCommand(): String? {
         thinking?.let { return it }
         if (!smartCommands) return null
-        val shown = phrases.values.lastOrNull()?.shown ?: return null
+        val phrase = phrases.values.lastOrNull()?.takeUnless { it.literal } ?: return null
+        val shown = visiblePhrase(phrase).takeIf { it.isNotBlank() } ?: return null
         return LocalCommands.trailingEdit(shown)?.second ?: when {
             LocalCommands.trailingSend(shown) != null -> "send"
             LocalCommands.preview(shown, smart = true) == null -> shown
