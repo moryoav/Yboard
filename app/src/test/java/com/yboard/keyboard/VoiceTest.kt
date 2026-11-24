@@ -2,6 +2,7 @@ package com.yboard.keyboard
 
 import com.yboard.keyboard.settings.YboardSettings
 import com.yboard.keyboard.voice.ApiKeyStore
+import com.yboard.keyboard.voice.DictatedTimes
 import com.yboard.keyboard.voice.LocalCommands
 import com.yboard.keyboard.voice.OpenAi
 import com.yboard.keyboard.voice.Vad
@@ -337,6 +338,28 @@ class VoiceTest {
             "text":"{\"remove\":\" hello\",\"insert\":\"\"}"}]}]}"""
         )
         assertEquals(VoiceEdit(" hello", ""), OpenAi.parseEdit(OpenAi.outputText(reply)!!))
+    }
+
+    @Test
+    fun formatsExplicitEnglishClockTimesAndPreservesPunctuation() {
+        assertEquals("Yes, I'll need to pick her up at 22:00.",
+            DictatedTimes.format("Yes, I'll need to pick her up at ten p.m."))
+        assertEquals("Meet at 08:05 Monday, 16:45 Tuesday, or 17:30 tomorrow.",
+            DictatedTimes.format("Meet at eight oh five a.m. Monday, four forty-five p.m. Tuesday, or 5:30pm tomorrow."))
+        assertEquals("Midnight is 00:00. It ends at 12:00.",
+            DictatedTimes.format("Midnight is twelve a.m. It ends at 12 p.m."))
+        assertEquals("The call is at 22:00!", DictatedTimes.format("The call is at ten p.m.!"))
+    }
+
+    @Test
+    fun formatsExplicitHebrewClockTimesAndKeepsAmbiguity() {
+        assertEquals("אאסוף אותה ב-22:00 וניפגש ב-07:30.",
+            DictatedTimes.format("אאסוף אותה בעשר בלילה וניפגש בשבע וחצי בבוקר."))
+        assertEquals("ניפגש ב-00:00 או ב-14:15.",
+            DictatedTimes.format("ניפגש בשתים עשרה בלילה או בשתיים ורבע אחר הצהריים."))
+        val unchanged = listOf("See you at ten.", "I have ten tickets.", "Meet at 22:00.", "13:10 p.m.",
+            "twenty one p.m.", "10 AM/PM", "ניפגש בעשר.", "ניפגש בשש בלילה.")
+        for (text in unchanged) assertEquals(text, DictatedTimes.format(text))
     }
 
     @Test

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.17.8
+
+- Formatted explicit dictated clock times locally, so “ten p.m.” becomes “22:00” in the preview and final text.
+
 ## 1.17.7
 
 - Added voice typing examples for numeric quantities and 24-hour times, such as “3 tickets” and “22:00”.

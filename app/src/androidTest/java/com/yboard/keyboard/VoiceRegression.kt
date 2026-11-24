@@ -173,6 +173,20 @@ object VoiceRegression {
             check(f.fileCalls == 1 && f.text() == "Recovered final words." && !f.voice.isActive)
         })
         scenario({ f ->
+            f.audio(); f.voice.onDelta("pickup", "Yes, I'll need to pick her up at ten p.")
+            f.voice.onDelta("pickup", "m.")
+            check(f.text() == "Yes, I'll need to pick her up at 22:00.") { f.text() }
+            f.phrase(); f.finish("pickup", "Yes, I'll need to pick her up at ten p.m.")
+            check(f.text() == "Yes, I'll need to pick her up at 22:00.") { f.text() }
+            f.phrase(); f.finish("delete", "delete that")
+            check(f.text().isEmpty()) { f.text() }
+        })
+        scenario({ f ->
+            f.phrase(); f.results.add("אאסוף אותה בעשר בלילה.")
+            f.voice.onClosed("offline", 0); f.clock.advance()
+            check(f.fileCalls == 1 && f.text() == "אאסוף אותה ב-22:00.") { f.text() }
+        }, smart = false)
+        scenario({ f ->
             f.phrase(); f.finish("list", "I bought milk , bread, and eggs .")
             check(f.text() == "I bought milk, bread, and eggs.")
             f.phrase(); f.finish("continuation", "Before I left")
@@ -419,12 +433,14 @@ object VoiceRegression {
             callbacks.onOpen(socket, Response.Builder().request(socket.request()).protocol(Protocol.HTTP_1_1).code(101).message("Switching").build())
         }
         fun event(json: String) { callbacks.onMessage(socket, json); clock.advance() }
+        fun transcription(setting: JSONObject) = setting.getJSONObject("session").getJSONObject("audio")
+            .getJSONObject("input").getJSONObject("transcription")
         var passed = 0
         val live = connection()
         live.append(ByteArray(4800)); live.commit("turn-one"); live.append(ByteArray(4800)); live.commit("turn-two")
         check(ready == 0 && sent.size == 1) { "Audio was sent before session configuration was accepted" }
-        check(sent.first().getJSONObject("session").getJSONObject("audio").getJSONObject("input")
-            .getJSONObject("transcription").getString("delay") == "high")
+        check(transcription(sent.first()).getString("delay") == "high")
+        check(transcription(sent.first()).getString("prompt").contains("I'll pick her up at 22:00."))
         event("""{"type":"session.updated"}""")
         check(ready == 1 && sent.map { it.getString("type") } == listOf("session.update", "input_audio_buffer.append", "input_audio_buffer.commit", "input_audio_buffer.append", "input_audio_buffer.commit"))
         check(sent[2].getString("event_id") == "turn-one" && sent[4].getString("event_id") == "turn-two")
@@ -441,7 +457,9 @@ object VoiceRegression {
         passed++
         val optional = connection()
         event("""{"type":"error","error":{"param":"session.audio.input.transcription.keywords","message":"Invalid keywords","code":"invalid_value"}}""")
-        check(sent.size == 2 && failures == 1)
+        check(sent.size == 2 && failures == 1 && transcription(sent.last()).has("prompt"))
+        event("""{"type":"error","error":{"param":"session.audio.input.transcription.prompt","message":"Invalid prompt","code":"invalid_value"}}""")
+        check(sent.size == 3 && failures == 1 && !transcription(sent.last()).has("prompt"))
         event("""{"type":"session.updated"}"""); check(ready == 2)
         optional.close(); clock.cancelAll(); sent.clear()
         passed++

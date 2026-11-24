@@ -702,7 +702,7 @@ class VoiceTyping(
             ?: (keyboardLanguage == "he")
 
     private fun insertDictation(spoken: String) {
-        val words = VoiceEdits.continuationCase(text.toString(), spoken, myNames)
+        val words = VoiceEdits.continuationCase(text.toString(), DictatedTimes.format(spoken), myNames)
         apply(VoiceEdit("", words), remember = true)
     }
 
@@ -771,7 +771,7 @@ class VoiceTyping(
             for (p in phrases.values) {
                 val shown = LocalCommands.preview(VoiceEdits.attachPunctuation(visiblePhrase(p)), smartCommands && !p.literal) ?: continue
                 val left = if (isEmpty()) before else toString()
-                val words = VoiceEdits.continuationCase(left, shown, myNames)
+                val words = VoiceEdits.continuationCase(left, DictatedTimes.format(shown), myNames)
                 append(VoiceEdits.forInsert(left, words))
             }
         }
