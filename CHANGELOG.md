@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.17.7
+
+- Added voice typing examples for numeric quantities and 24-hour times, such as “3 tickets” and “22:00”.
+
 ## 1.17.6
 
 - Fixed voice typing leaving close misspellings of saved My words entries in the same alphabet.

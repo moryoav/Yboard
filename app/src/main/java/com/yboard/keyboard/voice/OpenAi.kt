@@ -39,6 +39,7 @@ object OpenAi {
             "Keep a sentence together through hesitations and audio cuts when the words continue the same thought. " +
             "Decide whether a thought is complete from the words, including words that follow a hesitation. " +
             "Capitalize sentence starts, names, acronyms, and I. Continue a mid-sentence fragment in lowercase. " +
+            "Use digits for explicit quantities and HH:mm for unambiguous clock times. Never infer AM or PM. " +
             "Keep spoken editing commands and punctuation names as words, such as new line, delete that, " +
             "scratch that, send, question mark, comma, and period."
 
@@ -68,8 +69,14 @@ object OpenAi {
         }
         val sb = StringBuilder("Verbatim phone dictation in $language, never in any other language. $SPEECH_PROMPT")
         sb.append(" Follow this style:")
-        if ("en" in languages) sb.append(" If it rains, I'll stay home. I bought milk, bread, and eggs. Are you coming?")
-        if ("he" in languages) sb.append(" אם ירד גשם, אשאר בבית. קניתי חלב, לחם וביצים. אתה מגיע?")
+        if ("en" in languages) {
+            sb.append(" If it rains, I'll stay home. I bought milk, bread, and eggs. Are you coming?")
+            sb.append(" I bought 3 tickets. I'll pick her up at 22:00.")
+        }
+        if ("he" in languages) {
+            sb.append(" אם ירד גשם, אשאר בבית. קניתי חלב, לחם וביצים. אתה מגיע?")
+            sb.append(" קניתי 3 כרטיסים. אאסוף אותה ב-22:00.")
+        }
         val words = if (languages.size == 1) {
             (vocabulary + pairs.flatMap { listOf(it.first, it.second) }).distinct()
                 .filterNot { Scripts.hasDisallowed(it, languages) }.take(MAX_VOCABULARY)
