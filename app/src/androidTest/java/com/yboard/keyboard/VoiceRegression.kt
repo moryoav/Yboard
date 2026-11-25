@@ -331,6 +331,41 @@ object VoiceRegression {
             check(f.sends == 1 && f.commandCalls == 0)
         })
         scenario({ f ->
+            val words = "I'm testing this feature."
+            val command = "Remove the word feature"
+            f.audio(); f.voice.onDelta("one", words)
+            f.clock.advance(1800)
+            check(f.text() == words && f.pauseHints.last() == 0)
+            f.voice.onDelta("one", " $command")
+            check(f.text() == words && f.pauseHints.last() > 0)
+            f.phrase(); f.finish("one", "$words $command")
+            check(f.text() == "I'm testing this." && f.commandCalls == 0) { f.text() }
+            f.phrase(); f.finish("two", "Delete that.")
+            check(f.text().isEmpty()) { f.text() }
+        })
+        scenario({ f ->
+            val words = "I'm going to pick Lilac up."
+            val first = " Instead of that, no, remove the last three words"
+            val second = " Remove everything after the last period"
+            f.audio(); f.voice.onDelta("one", words)
+            f.clock.advance(1800)
+            f.voice.onDelta("one", first)
+            check(f.text() == words && f.pauseHints.last() > 0) { f.text() }
+            f.clock.advance(1800)
+            f.voice.onDelta("one", second)
+            check(f.text() == words && f.pauseHints.last() > 0) { f.text() }
+            f.phrase(); f.finish("one", "$words$first$second")
+            check(f.text() == "I'm going to." && f.commandCalls == 0) { f.text() }
+        })
+        scenario({ f ->
+            f.voice.onClosed("offline", 0); f.clock.advance()
+            f.results.add("Keep this sentence. These words can all go")
+            f.phrase()
+            f.results.add("Instead of that, no, remove the last three words. Remove everything after the last period.")
+            f.phrase()
+            check(f.text() == "Keep this sentence." && f.fileCalls == 2 && f.commandCalls == 0) { f.text() }
+        })
+        scenario({ f ->
             f.phrase(); f.voice.onCommitted("one"); f.voice.onDelta("one", "First")
             f.phrase(); f.voice.onCommitted("two"); f.voice.onCompleted("two", "Second.")
             f.results.add("First recovered.")

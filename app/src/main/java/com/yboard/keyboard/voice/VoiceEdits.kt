@@ -81,7 +81,6 @@ object VoiceEdits {
         "מחק", "מחקי", "למחוק", "בטל", "החלף", "תחליף", "תחליפי", "תשנה", "תשני", "תתקן", "תקן את", "תתרגם",
         "תוסיף", "תשים", "תוריד", "תמחוק",
     )
-    private val politeStart = Regex("^(?:(?:please|can you|could you|would you|בבקשה) )+")
     private val wordReplacement = Regex("(?:replace .+ (?:with|by)|change .+ (?:to|into))(?: (.+))?")
 
     /**
@@ -89,8 +88,7 @@ object VoiceEdits {
      * dictation should neither interrupt the audio turn nor hide the live transcript.
      */
     fun looksLikeCommand(spoken: String, preview: Boolean = false): Boolean {
-        val words = spoken.lowercase().replace(Regex("[\\p{P}\\p{S}]"), " ")
-            .replace(Regex("\\s+"), " ").trim().replaceFirst(politeStart, "")
+        val words = LocalCommands.normalize(spoken, trimTrailingFillers = false)
         val replacement = wordReplacement.matchEntire(words)
         return (replacement != null && (preview || replacement.groups[1] != null)) ||
             commandStarts.any { words == it || words.startsWith("$it ") }

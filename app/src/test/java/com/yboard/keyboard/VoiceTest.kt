@@ -176,6 +176,30 @@ class VoiceTest {
     }
 
     @Test
+    fun specificVoiceDeletionsKeepTheRestOfTheDraft() {
+        fun apply(before: String, spoken: String): String {
+            val match = LocalCommands.match(spoken, before, null)!!
+            assertEquals(LocalCommands.Kind.REMOVE_TEXT, match.kind)
+            assertTrue(before.endsWith(match.edit.remove))
+            return before.removeSuffix(match.edit.remove) + match.edit.insert
+        }
+        assertEquals("I'm testing this.", apply("I'm testing this feature.", "Remove the word feature"))
+        assertEquals("Feature is ready.", apply("Feature feature is ready.", "Remove the word feature"))
+        assertEquals("We can go.", apply("We can go now.", "Instead of that, no, remove the word now"))
+        assertEquals("One.", apply("One Two Three.", "Delete the last 2 words."))
+        assertEquals("First step.", apply("First step. Green red blue.", "Erase the last three words."))
+        assertEquals("Keep this.", apply("Keep this. Tail words can all go", "Remove the last three words. Remove everything after the last period."))
+        assertEquals("No full stop here", apply("No full stop here", "Remove everything after the last period"))
+        assertEquals("Only these two", apply("Only these two", "Remove the word absent"))
+        assertEquals("Only these two", apply("Only these two", "Remove the last ten words"))
+        assertEquals(null, LocalCommands.match("Remove the word feature from the title", "Feature is ready.", null))
+        val dictation = "I said remove the word feature when we talked."
+        assertEquals(dictation, LocalCommands.preview(dictation, smart = true))
+        assertEquals(null, LocalCommands.trailingEdit(dictation))
+        assertTrue(VoiceEdits.looksLikeCommand("Replace Monday with now"))
+    }
+
+    @Test
     fun saidDifferentlyStillWorks() {
         fun m(spoken: String, before: String, last: String? = null) = LocalCommands.match(spoken, before, last)
         assertEquals(VoiceEdit("", "?"), m("Add a question mark.", "hi")!!.edit)

@@ -489,6 +489,10 @@ class VoiceTyping(
         LocalCommands.match(spoken, before, lastTyped(before))?.let { m ->
             Log.i(TAG, "phrase $n: command ${m.kind}")
             if (m.kind == LocalCommands.Kind.DELETE_ALL) { deleteEverything(); return }
+            if (m.kind == LocalCommands.Kind.REMOVE_TEXT) {
+                if (m.edit.remove.isNotEmpty()) apply(m.edit, remember = false, reinsertExistingText = true)
+                return
+            }
             if (m.kind == LocalCommands.Kind.SEND) { send(); return }
             if (m.kind == LocalCommands.Kind.UNDO && deletedAll != null) { bringBackEverything(); return }
             if (m.kind == LocalCommands.Kind.CANCEL_PHRASE) {
@@ -706,7 +710,7 @@ class VoiceTyping(
         apply(VoiceEdit("", words), remember = true)
     }
 
-    private fun apply(edit0: VoiceEdit, remember: Boolean) {
+    private fun apply(edit0: VoiceEdit, remember: Boolean, reinsertExistingText: Boolean = false) {
         // Your names in the language you're speaking ("Yoav" in English, "יואב" in Hebrew).
         val edit = if (remember && (namePairs.isNotEmpty() || vocabulary.isNotEmpty())) {
             val fixed = com.yboard.keyboard.text.NameSpelling.fix(
@@ -714,7 +718,7 @@ class VoiceTyping(
             )
             if (fixed == edit0.insert || Scripts.hasDisallowed(fixed, languages)) edit0 else edit0.copy(insert = fixed)
         } else edit0
-        if (Scripts.hasDisallowed(edit.insert, languages)) {
+        if (!reinsertExistingText && Scripts.hasDisallowed(edit.insert, languages)) {
             notifyLanguageSkipped()
             return
         }
@@ -722,7 +726,10 @@ class VoiceTyping(
         deletedAll = null
         val before = text.toString()
         val n = VoiceEdits.removeCount(before, edit.remove)
-        if (n < 0) Log.w(TAG, "edit: text to remove wasn't at the end, nothing removed")
+        if (n < 0) {
+            Log.w(TAG, "edit: text to remove wasn't at the end, nothing removed")
+            if (reinsertExistingText) return
+        }
         ic.beginBatchEdit()
         if (composing.isNotEmpty()) {
             expectCursor(cursor)
@@ -732,7 +739,8 @@ class VoiceTyping(
         if (n > 0) {
             typed.lastOrNull()?.takeIf { before.endsWith(it) }?.let { latest ->
                 typed.removeAt(typed.lastIndex)
-                val kept = latest.dropLast(minOf(n, latest.length))
+                val retainedTail = if (reinsertExistingText && n <= latest.length) edit.insert else ""
+                val kept = latest.dropLast(minOf(n, latest.length)) + retainedTail
                 if (kept.isNotBlank()) typed.add(kept)
             }
             if (cursor >= 0) cursor = (cursor - n).coerceAtLeast(0)
@@ -741,7 +749,7 @@ class VoiceTyping(
             text.setLength(text.length - n)
         }
         val prefix = text.toString()
-        val insert = VoiceEdits.forInsert(prefix, edit.insert)
+        val insert = if (reinsertExistingText) edit.insert else VoiceEdits.forInsert(prefix, edit.insert)
         if (insert.isNotEmpty()) {
             if (cursor >= 0) cursor += insert.length
             expectCursor(cursor)

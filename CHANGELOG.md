@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.17.9
+
+- Fixed Smart commands for removing a named word, removing the last few words, and clearing text after the last period.
+- Recognized those deletions after correction phrases and when several arrive in one transcript.
+
 ## 1.17.8
 
 - Formatted explicit dictated clock times locally, so “ten p.m.” becomes “22:00” in the preview and final text.

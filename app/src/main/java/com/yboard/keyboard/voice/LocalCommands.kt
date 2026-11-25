@@ -8,7 +8,7 @@ package com.yboard.keyboard.voice
 object LocalCommands {
 
     /** What a whole-phrase command did (for the log; never contains the user's words). */
-    enum class Kind { DELETE_PHRASE, DELETE_WORD, DELETE_SENTENCE, DELETE_ALL, UNDO, NEW_LINE, NEW_PARAGRAPH, PUNCTUATION, CANCEL_PHRASE, SEND }
+    enum class Kind { DELETE_PHRASE, DELETE_WORD, DELETE_SENTENCE, DELETE_ALL, REMOVE_TEXT, UNDO, NEW_LINE, NEW_PARAGRAPH, PUNCTUATION, CANCEL_PHRASE, SEND }
 
     class Match(val kind: Kind, val edit: VoiceEdit)
 
@@ -105,7 +105,8 @@ object LocalCommands {
     )
 
     private val fillers = listOf(
-        "please", "now", "ok", "okay", "no", "oops", "actually", "um", "uh", "can you", "could you", "just",
+        "please", "now", "ok", "okay", "no", "oops", "actually", "um", "uh", "can you", "could you", "would you",
+        "just", "instead of that",
         "בבקשה", "עכשיו", "יאללה", "אוקיי", "לא", "אופס", "רגע", "אפשר", "תעשה לי טובה",
     )
 
@@ -171,15 +172,18 @@ object LocalCommands {
         .replace(Regex("\\s+"), " ").trim()
 
     /** Lowercase, no punctuation, no "please". */
-    fun normalize(spoken: String): String {
-        var n = clean(spoken)
+    fun normalize(spoken: String, trimTrailingFillers: Boolean = true): String =
+        withoutFillers(clean(spoken), trimTrailingFillers)
+
+    private fun withoutFillers(words: String, trimTrailingFillers: Boolean): String {
+        var n = words
         var changed = true
         while (changed && n.isNotEmpty()) {
             changed = false
             for (f in fillers) {
                 if (n == f) { n = ""; changed = true; break }
                 if (n.startsWith("$f ")) { n = n.removePrefix("$f "); changed = true }
-                if (n.endsWith(" $f")) { n = n.removeSuffix(" $f"); changed = true }
+                if (trimTrailingFillers && n.endsWith(" $f")) { n = n.removeSuffix(" $f"); changed = true }
             }
         }
         return n
@@ -191,6 +195,7 @@ object LocalCommands {
      */
     fun match(spoken: String, before: String, lastPhrase: String?): Match? {
         if (quotedPunctuation(spoken)) return null
+        removalCommands(spoken)?.let { return Match(Kind.REMOVE_TEXT, removeText(before, it)) }
         val stripped = normalize(spoken)
         val raw = clean(spoken)
         if (stripped.isEmpty() && raw.isEmpty()) return null
@@ -280,7 +285,7 @@ object LocalCommands {
     private val abbreviations = setOf("e.g.", "i.e.", "mr.", "mrs.", "ms.", "dr.", "prof.")
     private val initial = Regex("[A-Za-z]\\.")
 
-    private fun lastSentenceBreak(text: String) = sentenceBreak.findAll(text).lastOrNull { match ->
+    private fun sentenceBreaks(text: String) = sentenceBreak.findAll(text).filter { match ->
         val lastWord = text.substring(0, match.range.first).takeLastWhile { !it.isWhitespace() }
         lastWord.lowercase() !in abbreviations && !initial.matches(lastWord)
     }
@@ -288,7 +293,11 @@ object LocalCommands {
     /** A spoken edit can follow a complete sentence in the same transcription turn. */
     fun trailingEdit(spoken: String): Pair<String, String>? {
         val body = spoken.trimEnd { it.isWhitespace() || it in ".!?…" }
-        val separator = lastSentenceBreak(body) ?: return null
+        if (removalCommands(body) != null) return null
+        val separators = sentenceBreaks(body).toList()
+        // Take the entire command suffix when several supported deletions share one turn.
+        val separator = separators.firstOrNull { removalCommands(body.substring(it.range.last + 1)) != null }
+            ?: separators.lastOrNull() ?: return null
         val tail = spoken.substring(separator.range.last + 1)
         val command = normalize(tail)
         if (command in send || command in sendMisheard || command in punctuation ||
@@ -299,9 +308,80 @@ object LocalCommands {
 
     /** The last sentence within dictation added in this turn, including its separating space. */
     fun latestDictatedSentence(spoken: String): String {
-        val separator = lastSentenceBreak(spoken.trimEnd()) ?: return spoken
+        val separator = sentenceBreaks(spoken.trimEnd()).lastOrNull() ?: return spoken
         return spoken.substring(separator.range.first)
     }
+
+    private val editWord = Regex("""[\p{L}\p{M}\p{N}]+(?:['’\p{Pd}][\p{L}\p{M}\p{N}]+)*""")
+    private val counts = listOf("one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten")
+    private val removal = Regex(
+        """(?<!\S)(?:delete|remove|erase) (?:the word (?<word>${editWord.pattern})|""" +
+            """the last (?<count>[1-9][0-9]*|${counts.joinToString("|")}) words?|""" +
+            """(?:everything|all(?: the text)?) after the last (?:period|full stop))(?!\S)""",
+    )
+    private val commandLinks = setOf("", "and", "then", "and then")
+
+    /** Recognize only complete deletions, allowing several commands in one transcript. */
+    private fun removalCommands(spoken: String): List<MatchResult>? {
+        val words = editWord.findAll(spoken).joinToString(" ") { it.value.lowercase() }
+        fun parse(text: String): List<MatchResult>? {
+            val matches = removal.findAll(text).toList()
+            var end = 0
+            for (match in matches) {
+                val gap = text.substring(end, match.range.first).trim()
+                if ((end == 0 && gap.isNotEmpty()) || gap !in commandLinks) return null
+                end = match.range.last + 1
+            }
+            return matches.takeIf { it.isNotEmpty() && end == text.length }
+        }
+        // A trailing filler can also be the target, as in "remove the word now".
+        val withoutLeadIn = withoutFillers(words, trimTrailingFillers = false)
+        return parse(withoutLeadIn) ?: parse(withoutFillers(withoutLeadIn, trimTrailingFillers = true))
+    }
+
+    private fun removeText(before: String, commands: List<MatchResult>): VoiceEdit {
+        var after = before
+        var firstChange = before.length
+        for (command in commands) {
+            val word = command.groups["word"]?.value
+            val count = command.groups["count"]?.value
+            val start: Int
+            val end: Int
+            when {
+                word != null -> {
+                    val spelling = word.replace('’', '\'')
+                    val target = editWord.findAll(after).lastOrNull {
+                        it.value.replace('’', '\'').equals(spelling, ignoreCase = true)
+                    } ?: continue
+                    val right = target.range.last + 1
+                    val spaces = after.substring(right).takeWhile { it == ' ' || it == '\t' }.length
+                    val left = target.range.first
+                    start = if (spaces == 0 || right + spaces == after.length) beforeHorizontalSpace(after, left) else left
+                    end = right + spaces
+                }
+                count != null -> {
+                    val words = editWord.findAll(after).toList()
+                    val amount = count.toIntOrNull() ?: (counts.indexOf(count) + 1)
+                    if (amount !in 1..words.size) continue
+                    start = beforeHorizontalSpace(after, words[words.size - amount].range.first)
+                    end = if (start == 0 || VoiceEdits.endsSentence(after.substring(0, start))) after.length
+                    else words.last().range.last + 1
+                }
+                else -> {
+                    val period = after.lastIndexOf('.')
+                    if (period < 0 || period == after.lastIndex) continue
+                    start = period + 1
+                    end = after.length
+                }
+            }
+            firstChange = minOf(firstChange, start)
+            after = after.removeRange(start, end)
+        }
+        return VoiceEdit(before.substring(firstChange), after.substring(firstChange))
+    }
+
+    private fun beforeHorizontalSpace(text: String, index: Int): Int =
+        index - text.take(index).takeLastWhile { it == ' ' || it == '\t' }.length
 
     /**
      * A command that [n] is a near-miss of ("delete hat" -> "delete that", "new lane" -> "new line").
