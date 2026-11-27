@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.17.10
+
+- Kept the screen awake from the start of voice typing until transcription finishes or the keyboard closes, then restored normal screen timeout behavior.
+
 ## 1.17.9
 
 - Fixed Smart commands for removing a named word, removing the last few words, and clearing text after the last period.

@@ -157,7 +157,11 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     private val voiceHost = object : VoiceTyping.Host {
         override fun inputConnection() = currentInputConnection
         override fun onVoiceUi(status: String?, level: Float, listening: Boolean) {
-            root?.toolbar?.setVoice(status, level, listening)
+            root?.apply {
+                // Keep the display awake while the final transcript is being processed too.
+                keepScreenOn = status != null
+                toolbar.setVoice(status, level, listening)
+            }
             if (status == null) {
                 voice = null
                 updateSuggestions()
