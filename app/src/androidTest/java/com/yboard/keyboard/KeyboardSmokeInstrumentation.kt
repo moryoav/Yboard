@@ -44,6 +44,8 @@ class KeyboardSmokeInstrumentation : Instrumentation() {
                 result.putString("result", PredictionImeChecks(this).run())
             } else if (mode == "correction_learning") {
                 result.putString("result", PredictionImeChecks(this).checkCorrectionLearning())
+            } else if (mode == "typing_diagnostics") {
+                result.putString("result", PredictionImeChecks(this).checkTypingDiagnostics())
             } else if (mode == "autofill_bar") {
                 var failure: Throwable? = null
                 runOnMainSync { try { checkAutofillBar() } catch (error: Throwable) { failure = error } }

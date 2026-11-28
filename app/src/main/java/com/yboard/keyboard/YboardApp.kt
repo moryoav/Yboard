@@ -1,6 +1,7 @@
 package com.yboard.keyboard
 
 import android.app.Application
+import com.yboard.keyboard.ime.TypingDiagnostics
 import com.yboard.keyboard.settings.Prefs
 import com.yboard.keyboard.update.UpdateCheckJob
 import com.yboard.keyboard.update.UpdateNotifications
@@ -10,6 +11,7 @@ class YboardApp : Application() {
     override fun onCreate() {
         super.onCreate()
         Prefs.init(this)
+        TypingDiagnostics.init(this)
         UsageStore.init(this)
         com.yboard.keyboard.local.QwenModel.init(this)
         UpdateNotifications.initialize(this)

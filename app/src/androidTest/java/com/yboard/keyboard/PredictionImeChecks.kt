@@ -6,6 +6,7 @@ import android.os.SystemClock
 import android.text.InputType
 import android.view.MotionEvent
 import android.view.inputmethod.EditorInfo
+import com.yboard.keyboard.ime.TypingDiagnostics
 import com.yboard.keyboard.ime.YboardIME
 import com.yboard.keyboard.keyboard.KeyDef
 import com.yboard.keyboard.keyboard.KeyType
@@ -17,6 +18,8 @@ import com.yboard.keyboard.text.Pt
 import com.yboard.keyboard.text.SentenceContext
 import com.yboard.keyboard.text.Suggester
 import com.yboard.keyboard.text.UserWords
+import java.io.File
+import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -293,6 +296,87 @@ internal class PredictionImeChecks(private val instrumentation: Instrumentation)
                 }
                 Prefs.update { prefs }
             }
+        }
+    }
+
+    fun checkTypingDiagnostics(): String {
+        val context = instrumentation.targetContext
+        val log = File(context.noBackupFilesDir, "typing-diagnostics.jsonl")
+        check(TypingDiagnostics.recording == null && !log.exists() &&
+            !File(context.noBackupFilesDir, "typing-diagnostics-previous.jsonl").exists()) {
+            "Use an emulator with recording off and no existing typing log"
+        }
+        val saved = Prefs.current
+        fun type(value: String) = value.forEach { ime.onKey(KeyDef(KeyType.CHAR, it.toString())) }
+        try {
+            onMain {
+                Prefs.update {
+                    it.copy(language = "en", english = true, hebrew = true, suggestions = true, nextWords = true, learnWords = false,
+                        autoCaps = false, swipeTyping = true)
+                }
+            }
+            launch("Before opt-in ")
+            onMain { type("offrecord") }
+            await("typed before opt-in") { text() == "Before opt-in offrecord" }
+            check(!log.exists())
+
+            launch("See you to")
+            onMain {
+                TypingDiagnostics.setEnabled(true)
+                type("m")
+            }
+            await("completion in diagnostic session", timeoutMs = 45_000) { slots().contains("tomorrow") }
+            onMain { ime.onSuggestion(slots().indexOf("tomorrow")) }
+            await("committed completion") { text() == "See you tomorrow " }
+            await("next-word predictions", timeoutMs = 45_000) { slots().any { it.isNotEmpty() } }
+            launch("I will be ")
+            onMain { touchGlide("there") }
+            await("recorded glide", timeoutMs = 45_000) { text() == "I will be there" && slots().contains("there") }
+            onMain { ime.onKey(KeyDef(KeyType.BACKSPACE)); type("early") }
+            await("manual correction after glide") { text() == "I will be early" }
+
+            onMain { Prefs.update { it.copy(language = "he", suggestions = false) } }
+            launch("הקודמץ")
+            onMain { ime.onKey(KeyDef(KeyType.BACKSPACE)); type("ת") }
+            await("Hebrew manual correction") { text() == "הקודמת" }
+
+            if (launch("pwfixture", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)) {
+                onMain { type("hiddenfixture") }
+                await("typed in password editor") { text() == "pwfixturehiddenfixture" }
+            }
+            onMain { TypingDiagnostics.setEnabled(false) }
+            launch("After opt-out ")
+            onMain { type("offagain") }
+            await("typed after opt-out") { text() == "After opt-out offagain" }
+            await("diagnostic log persisted") { log.exists() && log.readText().contains("\"recording_stopped\"") }
+
+            val raw = log.readText()
+            val rows = raw.lineSequence().filter { it.isNotBlank() }.map(::JSONObject).toList()
+            fun events(name: String) = rows.filter { it.getString("event") == name }
+            check(events("suggestions_shown").any { it.optString("source") == "next_word" })
+            check(events("prediction_result").any { (it.optJSONArray("candidates")?.length() ?: 0) > 0 })
+            check(events("suggestion_tapped").any { it.optString("replacing") == "tom" && it.optString("word") == "tomorrow" })
+            val path = events("glide_path").single()
+            check(path.getJSONArray("path").length() > 2)
+            val gesture = path.getInt("gestureId")
+            check(events("glide_ranked").single().getInt("gestureId") == gesture)
+            check(events("glide_result").single().optString("word") == "there")
+            val edits = events("editor_edit")
+            check(edits.any { it.optInt("relatedId") == gesture && it.optString("source") == "glide" })
+            check(edits.any { it.optJSONObject("change")?.optString("removed") == "there" })
+            check(edits.any { it.optJSONObject("after")?.optString("beforeCursor") == "I will be early" })
+            check(edits.any { it.optJSONObject("change")?.optString("removed") == "ץ" })
+            check(edits.any { it.optJSONObject("after")?.optString("beforeCursor") == "הקודמת" })
+            listOf("offrecord", "offagain", "pwfixture", "hiddenfixture").forEach { fixture ->
+                check(fixture !in raw) { "Unexpected fixture in log: $fixture" }
+            }
+            return "Typing diagnostics captured glide ranking, completion, next words, and English and Hebrew corrections. Off and password fields stayed out of the log."
+        } finally {
+            onMain {
+                TypingDiagnostics.setEnabled(false)
+                Prefs.update { saved }
+            }
+            runBlocking { TypingDiagnostics.clear() }
         }
     }
 

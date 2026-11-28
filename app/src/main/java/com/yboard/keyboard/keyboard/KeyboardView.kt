@@ -54,6 +54,7 @@ class KeyboardView(context: Context) : View(context) {
         /** A swipe-typing gesture finished. */
         fun onSwipe(path: List<Pt>, keyCenters: Map<Char, Pt>, keyWidth: Float) {}
         fun onSwipeStart() {}
+        fun onSwipeCancel() {}
         /** Finger slid left from backspace: select this many words back (0 = none). */
         fun onBackspaceSwipe(words: Int) {}
         /** Finger lifted after sliding on backspace; [apply] = delete the selected words. */
@@ -1066,6 +1067,7 @@ class KeyboardView(context: Context) : View(context) {
     }
 
     fun cancelAllPointers() {
+        if (pointers.values.any { it.gesture }) listener?.onSwipeCancel()
         pointers.values.forEach { cancelLongPress(it) }
         pointers.clear()
         pressedBoxes.clear()

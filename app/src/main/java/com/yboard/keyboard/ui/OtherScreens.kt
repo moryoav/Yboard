@@ -81,6 +81,7 @@ fun TypingScreen(
     onShortcuts: () -> Unit = {},
     onMyWords: () -> Unit = {},
     onLearnedWords: () -> Unit,
+    onDiagnostics: () -> Unit = {},
 ) {
     val context = LocalContext.current
     var confirmClear by remember { mutableStateOf(false) }
@@ -143,6 +144,9 @@ fun TypingScreen(
                 "${settings.longPressDelay} ms",
             ) { v -> Prefs.update { it.copy(longPressDelay = (v / 10).roundToInt() * 10) } }
             HintText("Long-press a letter for accents (é, ñ…) or numbers, the period for punctuation, and the comma for emoji.")
+        }
+        Section {
+            NavRow(R.drawable.ic_info, Screen.TYPING_DIAGNOSTICS.title, "Record and export glide, suggestions, and corrections", onDiagnostics)
         }
     }
     if (confirmClear) {

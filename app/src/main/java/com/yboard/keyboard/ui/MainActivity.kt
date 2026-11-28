@@ -51,6 +51,7 @@ enum class Screen(val title: String) {
     LAYOUT("Layout & size"),
     TOOLBAR("Toolbar shortcuts"),
     TYPING("Typing"),
+    TYPING_DIAGNOSTICS("Typing diagnostics"),
     SOUND("Sound & vibration"),
     LANGUAGES("Languages"),
     VOICE("Voice typing"),
@@ -203,7 +204,9 @@ fun YboardSettingsApp(openRequest: MutableState<String?> = mutableStateOf(null))
                 onShortcuts = { open(Screen.SHORTCUTS) },
                 onMyWords = { open(Screen.MY_WORDS) },
                 onLearnedWords = { open(Screen.LEARNED_WORDS) },
+                onDiagnostics = { open(Screen.TYPING_DIAGNOSTICS) },
             )
+            Screen.TYPING_DIAGNOSTICS -> TypingDiagnosticsScreen(onBack = ::back)
             Screen.SHORTCUTS -> ShortcutsScreen(settings, onBack = ::back)
             Screen.MY_WORDS -> MyWordsScreen(settings, onBack = ::back)
             Screen.LEARNED_WORDS -> LearnedWordsScreen(settings.activeLanguage, onBack = ::back)

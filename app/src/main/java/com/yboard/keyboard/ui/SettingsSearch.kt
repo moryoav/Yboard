@@ -91,6 +91,7 @@ object SettingsIndex {
         SettingEntry("Hide Android's switch-keyboard button", Screen.LAYOUT, "$LAYOUT › Keys", "gboard globe switch bar bottom"),
         SettingEntry("One-handed mode", Screen.LAYOUT, LAYOUT, "one hand left right thumb small יד אחת"),
         // Typing
+        SettingEntry("Typing diagnostics", Screen.TYPING, TYPING, "debug logging record export glide suggestions predictions corrections"),
         SettingEntry("Word suggestions", Screen.TYPING, "$TYPING › Suggestions", "suggestions strip words הצעות"),
         SettingEntry("Next-word predictions", Screen.TYPING, "$TYPING › Suggestions", "predict next word"),
         SettingEntry("Local predictions", Screen.AI_MODELS, Screen.AI_MODELS.title, "qwen gemma llm ai offline download model typing swipe prediction context"),

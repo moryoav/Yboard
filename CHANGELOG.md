@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.18.0
+
+- Added opt-in typing diagnostics with an exportable log of glide paths and candidates, suggestions, and before-and-after text edits.
+
 ## 1.17.10
 
 - Kept the screen awake from the start of voice typing until transcription finishes or the keyboard closes, then restored normal screen timeout behavior.

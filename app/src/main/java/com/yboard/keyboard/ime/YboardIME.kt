@@ -79,6 +79,8 @@ import com.yboard.keyboard.stickers.StickerRequestGate
 import com.yboard.keyboard.keyboard.StickerPanel
 import java.util.concurrent.Executors
 import kotlin.math.abs
+import org.json.JSONArray
+import org.json.JSONObject
 
 class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Listener {
 
@@ -92,6 +94,9 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     private data class SuggestionSpace(val cursor: Int, val inserted: String)
     private var suggestionSpace: SuggestionSpace? = null
     private var editorInfo: EditorInfo? = null
+    private var trace: TypingTrace? = null
+    private var traceViewActive = false
+    private var traceRestarting = false
     private var selecting = false
     private var clipboard: ClipboardManager? = null
     private val clips = mutableListOf<String>()
@@ -141,7 +146,8 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     private data class RecentSwipe(val word: String, val before: String, val offset: Int?, val alternatives: List<String>)
     private val recentSwipes = ArrayDeque<RecentSwipe>()
     private var lastSwipe: SwipeCommit? = null
-    private val pendingSwipes = ArrayDeque<List<SwipeDecoder.Candidate>>()
+    private data class PendingSwipe(val candidates: List<SwipeDecoder.Candidate>, val traceId: Int?)
+    private val pendingSwipes = ArrayDeque<PendingSwipe>()
     private val swipePending get() = pendingSwipes.isNotEmpty()
 
     // Backspace slide-to-delete-words.
@@ -155,7 +161,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     // AI voice typing (only while the mic is on).
     private var voice: VoiceTyping? = null
     private val voiceHost = object : VoiceTyping.Host {
-        override fun inputConnection() = currentInputConnection
+        override fun inputConnection() = currentInputConnection?.let { traceConnection(it, "voice") }
         override fun onVoiceUi(status: String?, level: Float, listening: Boolean) {
             root?.apply {
                 // Keep the display awake while the final transcript is being processed too.
@@ -179,7 +185,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
                 val enterIsSend = (info.imeOptions and EditorInfo.IME_FLAG_NO_ENTER_ACTION) == 0 &&
                     action != EditorInfo.IME_ACTION_NONE && action != EditorInfo.IME_ACTION_UNSPECIFIED
                 if (enterIsSend) {
-                    sendKeyChar('\n')  // the field's own send / go / search
+                    traceEditorAction("voice", "enter") { sendKeyChar('\n') }  // the field's own send / go / search
                     return VoiceTyping.SendResult.ACTION
                 }
             }
@@ -190,7 +196,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
                 if (!lastTry) return VoiceTyping.SendResult.NO_BUTTON
             }
             // Otherwise Enter, which sends when the app's "Enter is send" setting is on.
-            sendKeyChar('\n')
+            traceEditorAction("voice", "enter") { sendKeyChar('\n') }
             return VoiceTyping.SendResult.ENTER
         }
         override fun sendHelperOn() = com.yboard.keyboard.voice.SendButtonService.instance != null
@@ -240,6 +246,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         closeSticker()
         imageWorker.shutdownNow()
         endVoice()
+        stopTrace()
         cancelAiPredictions()
         if (Build.VERSION.SDK_INT >= 31) {
             try { getSystemService(WindowManager::class.java)?.removeCrossWindowBlurEnabledListener(blurListener) } catch (_: Exception) {}
@@ -347,6 +354,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         predictionFieldActive = false
         failedInput = null
         endVoice()
+        stopTrace()
         sprinkle = null
         sprinkleRound++
         ensureNamePairs()
@@ -375,6 +383,9 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
             (info.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) == 0
         if (!learningAllowed) wordLearning.clear()
         predictionFieldActive = true
+        traceViewActive = true
+        traceRestarting = restarting
+        typingTrace()?.let(::traceConfiguration)
         lastAutoCorrect = null
         lastSwipe = null
         clearReplacementSession()
@@ -402,6 +413,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         failedInput = null
         stripBefore = null
         root?.keyboard?.cancelAllPointers()
+        stopTrace()
         super.onFinishInputView(finishingInput)
     }
 
@@ -414,6 +426,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         LocalQwen.clearContext()
         closeSticker()
         endVoice()
+        stopTrace()
         super.onFinishInput()
         cancelAiPredictions()
         qwenWords = emptyList()
@@ -465,6 +478,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         candidatesStart: Int, candidatesEnd: Int,
     ) {
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
+        typingTrace()?.selection(currentInputConnection, oldSelStart, oldSelEnd, newSelStart, newSelEnd)
         selStart = newSelStart
         selEnd = newSelEnd
         if (oldSelEnd != newSelEnd) {
@@ -493,6 +507,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         qwenWords = emptyList()
         qwenInput = null
         settings = s
+        typingTrace()?.let(::traceConfiguration)
         if (!s.learnWords) wordLearning.clear()
         voice?.namePairs = s.myWordPairs
         UserWords.setMyWords(s.myWords)
@@ -505,6 +520,41 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         applyBlur()
         updateSuggestions()
         if (s.sound && s.soundStyle != "system") KeySounds.warmUp(this)
+    }
+
+    private fun typingTrace(): TypingTrace? {
+        val recording = TypingDiagnostics.recording ?: return null
+        val info = editorInfo ?: return null
+        if (!traceViewActive || isPasswordField(info) || isPasswordField(currentInputEditorInfo)) return null
+        return trace?.takeIf { it.recording == recording }
+            ?: TypingTrace(recording, info, traceRestarting).also { trace = it }
+    }
+
+    private fun stopTrace() {
+        trace?.event("editor_finished")
+        trace = null
+        traceViewActive = false
+    }
+
+    private fun traceConfiguration(trace: TypingTrace) = trace.event("configuration") {
+        put("language", layoutLanguage())
+        put("swipeTyping", settings.swipeTyping)
+        put("suggestions", settings.suggestions)
+        put("nextWords", settings.nextWords)
+        put("learnWords", settings.learnWords)
+        put("suggestionsAllowedInField", suggestionsAllowed)
+        put("personalizationAllowedInField", learningAllowed)
+        put("model", QwenModel.selected.label)
+        put("modelReady", QwenModel.selectedState.ready)
+    }
+
+    private fun traceConnection(connection: InputConnection, source: String, relatedId: Int? = null): InputConnection =
+        typingTrace()?.wrap(connection, source, relatedId) ?: connection
+
+    private fun traceEditorAction(source: String, operation: String, action: () -> Unit) {
+        val trace = typingTrace()
+        val connection = if (trace == null) null else currentInputConnection
+        if (trace == null || connection == null) action() else trace.observe(connection, source, operation, action)
     }
 
     // ----------------------------------------------------------- word engine
@@ -580,18 +630,27 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         return (ls.cursor == null || ls.cursor == (target.cursor ?: selEnd)) && target.before == ls.word
     }
 
-    private fun showStrip(words: List<String>, primary: Int, display: List<String> = words) {
+    private fun showStrip(words: List<String>, primary: Int, source: String) {
         if (replacement != null) root?.toolbar?.cancelSuggestionPress()
         replacement = null
         stripBefore = suggestionText ?: currentInputConnection?.getTextBeforeCursor(SentenceContext.READ_LIMIT, 0)?.toString()
         stripCursor = selEnd
         modelNote = false
         slotWords = words
-        slotDisplay = display
+        slotDisplay = words
         emojiSlot = -1
         emailChips = emptyList()
-        root?.toolbar?.setSuggestions(display, primary)
+        root?.toolbar?.setSuggestions(words, primary)
+        traceStrip(source, words, primary, stripBefore)
     }
+
+    private fun traceStrip(source: String, words: List<String>, primary: Int, before: String? = null) {
+        typingTrace()?.strip(source, words, primary, before, selEnd)
+    }
+
+    private fun scoredWords(words: List<ScoredWord>) = JSONArray(words.map {
+        JSONObject().put("word", it.word).put("score", it.score.takeIf(Double::isFinite))
+    })
 
     // Other AI features keep their own worker. Typing and glide probabilities use the selected local model.
     private val aiExecutor = Executors.newSingleThreadExecutor()
@@ -622,6 +681,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
             qwenInput = null
             qwenWords = emptyList()
             lastSwipe = null
+            typingTrace()?.let(::traceConfiguration)
         }
         failedInput = null
         updateSuggestions()
@@ -634,11 +694,13 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     }
 
     private fun resetPredictionRequests() {
+        if (qwenRequested != null) typingTrace()?.event("prediction_cancelled") { put("requestId", localRound) }
         localRound++
         localPending?.let { main.removeCallbacks(it) }
         localPending = null
         qwenRequested = null
         if (swipePending) {
+            typingTrace()?.event("glide_cancelled") { put("gestureIds", JSONArray(pendingSwipes.mapNotNull { it.traceId })) }
             pendingSwipes.clear()
             clearStrip()
         }
@@ -673,6 +735,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         modelNote = true
         modelNoteAction = text == "Download model" || text == "Model unavailable"
         root?.toolbar?.setSuggestions(listOf("", text, ""), -1)
+        traceStrip("status", listOf("", text, ""), -1)
     }
 
     private fun renderLocal(input: SentenceContext.Input): Boolean {
@@ -690,7 +753,8 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         }
         currentWord = input.prefix
         typedSlot = -1
-        showStrip(listOf(cased.getOrElse(1) { "" }, cased[0], cased.getOrElse(2) { "" }), 1)
+        showStrip(listOf(cased.getOrElse(1) { "" }, cased[0], cased.getOrElse(2) { "" }), 1,
+            if (input.prefix.isEmpty()) "next_word" else "completion")
         return true
     }
 
@@ -713,9 +777,20 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         qwenRequested = input
         val pending = Runnable {
             if (round != localRound || !localAllowed()) return@Runnable
+            typingTrace()?.event("prediction_requested") {
+                put("requestId", round)
+                put("context", input.context)
+                put("prefix", input.prefix)
+            }
             LocalQwen.predict(input.context, input.prefix) { result ->
                 if (round != localRound || !localAllowed()) return@predict
                 qwenRequested = null
+                typingTrace()?.event("prediction_result") {
+                    put("requestId", round)
+                    put("elapsedMs", result.getOrNull()?.elapsedMs)
+                    put("candidates", result.getOrNull()?.let { scoredWords(it.candidates) })
+                    put("error", result.exceptionOrNull()?.javaClass?.simpleName)
+                }
                 val now = localInput() ?: return@predict
                 if (!now.sameWord(input) || cursorInsideWord()) return@predict
                 result.onSuccess { output ->
@@ -747,7 +822,10 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
 
     private fun acceptSwipe() {
         val swipe = lastSwipe ?: return
-        if (swipeWordBeforeCursor()) learnAccepted(swipe.word, (swipe.cursor ?: selEnd) - swipe.word.length)
+        if (swipeWordBeforeCursor()) {
+            typingTrace()?.event("glide_kept") { put("word", swipe.word) }
+            learnAccepted(swipe.word, (swipe.cursor ?: selEnd) - swipe.word.length)
+        }
         lastSwipe = null
     }
 
@@ -762,6 +840,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         stripBefore = null
         stripCursor = -1
         root?.toolbar?.setSuggestions(emptyList(), -1)
+        traceStrip("cleared", emptyList(), -1)
     }
 
     /** Email boxes: your address and common endings in the strip. */
@@ -771,7 +850,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         if (chips.all { it == null }) { clearStrip(); return }
         currentWord = ""
         typedSlot = -1
-        showStrip(chips.map { it?.text ?: "" }, 1)
+        showStrip(chips.map { it?.text ?: "" }, 1, "email")
         emailChips = chips
     }
 
@@ -800,7 +879,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
             val swipe = lastSwipe!!
             val alternatives = swipe.alternatives.filter { it != swipe.word }
             currentWord = ""
-            showStrip(listOf(alternatives.getOrElse(0) { "" }, swipe.word, alternatives.getOrElse(1) { "" }), 1)
+            showStrip(listOf(alternatives.getOrElse(0) { "" }, swipe.word, alternatives.getOrElse(1) { "" }), 1, "glide")
             return
         }
         lastSwipe = null
@@ -826,13 +905,14 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     private fun applyAutoCorrect(separator: String): Boolean {
         if (!suggestionsAllowed) return false
         if (selStart != selEnd || emojiSearchBar != null) return false
-        val ic = currentInputConnection ?: return false
+        val connection = currentInputConnection ?: return false
         val w = wordBeforeCursor()
         if (w.isEmpty() || cursorInsideWord()) return false
         if (Dictionary.normalize(w) in rejected) return false
         // Text shortcuts first, then typo fixes.
         val fix = shortcutFor(w) ?: return false
         if (fix == w) return false
+        val ic = traceConnection(connection, "text_shortcut")
         ic.beginBatchEdit()
         val committed = ic.deleteSurroundingText(w.length, 0) && ic.commitText(fix + separator, 1)
         ic.endBatchEdit()
@@ -919,11 +999,22 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         if (event.isPrintingKey || keyCode == KeyEvent.KEYCODE_DEL || keyCode == KeyEvent.KEYCODE_ENTER) {
             dismissClipboardOffer()
+            typingTrace()?.event("hardware_key") {
+                put("key", KeyEvent.keyCodeToString(keyCode))
+                put("unicode", event.unicodeChar)
+                put("modifiers", event.metaState)
+            }
         }
         return super.onKeyDown(keyCode, event)
     }
 
     override fun onKey(key: KeyDef) {
+        typingTrace()?.event("key_tap") {
+            put("key", key.type.name)
+            put("output", key.output)
+            put("shift", shift.name)
+            put("emojiSearch", emojiSearchBar != null)
+        }
         dismissWordReplacement()
         stripBefore = null
         if (swipePending) cancelAiPredictions()
@@ -944,6 +1035,10 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     }
 
     override fun onText(text: String) {
+        typingTrace()?.event("long_press_text") {
+            put("text", text)
+            put("emojiSearch", emojiSearchBar != null)
+        }
         dismissWordReplacement()
         endVoice()
         cancelAiPredictions()
@@ -954,7 +1049,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     private fun commitTextKey(text: String) {
         dismissClipboardOffer()
         lastAutoCorrect = null
-        val ic = currentInputConnection ?: return
+        val ic = traceConnection(currentInputConnection ?: return, "typing")
         val prependSpace = text.firstOrNull()?.isLetterOrDigit() == true && swipeWordBeforeCursor()
         val replacedSpace = replaceSuggestionSpace(ic, text)
         if (!replacedSpace) {
@@ -987,7 +1082,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     private fun handleSpace() {
         dismissClipboardOffer()
         suggestionSpace = null
-        val ic = currentInputConnection ?: return
+        val ic = traceConnection(currentInputConnection ?: return, "space")
         val now = SystemClock.uptimeMillis()
         if (settings.doubleSpacePeriod && now - lastSpaceTime < 700) {
             val before = ic.getTextBeforeCursor(2, 0)
@@ -1010,7 +1105,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     private fun handleBackspace() {
         dismissClipboardOffer()
         suggestionSpace = null
-        val ic = currentInputConnection ?: return
+        val ic = traceConnection(currentInputConnection ?: return, "backspace")
         val target = learningTarget(ic)
         lastSpaceTime = 0
         // Backspace right after an autocorrect puts back what you typed.
@@ -1043,7 +1138,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         }
         val before = ic.getTextBeforeCursor(32, 0)
         if (before.isNullOrEmpty()) {
-            sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL)
+            traceEditorAction("backspace", "send_delete_key") { sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL) }
             return
         }
         // Delete one whole character, including multi-part emoji like 👩‍💻 or flags.
@@ -1058,7 +1153,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     private fun handleEnter() {
         dismissClipboardOffer()
         suggestionSpace = null
-        val ic = currentInputConnection ?: return
+        val ic = traceConnection(currentInputConnection ?: return, "enter")
         val info = editorInfo
         val type = root?.keyboard?.enterType ?: EnterType.NEWLINE
         lastSpaceTime = 0
@@ -1067,7 +1162,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         when {
             type != EnterType.NEWLINE && info != null ->
                 ic.performEditorAction(info.imeOptions and EditorInfo.IME_MASK_ACTION)
-            else -> sendKeyChar('\n')
+            else -> traceEditorAction("enter", "send_enter") { sendKeyChar('\n') }
         }
     }
 
@@ -1109,7 +1204,9 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         qwenWords = emptyList()
         qwenInput = null
         val code = if (steps > 0) KeyEvent.KEYCODE_DPAD_RIGHT else KeyEvent.KEYCODE_DPAD_LEFT
-        repeat(abs(steps)) { sendDownUpKeyEvents(code) }
+        traceEditorAction("spacebar_cursor", KeyEvent.keyCodeToString(code)) {
+            repeat(abs(steps)) { sendDownUpKeyEvents(code) }
+        }
     }
 
     override fun onOneHanded(action: Int) {
@@ -1127,6 +1224,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     private var preparedSwipe: PreparedSwipe? = null
 
     override fun onSwipeStart() {
+        typingTrace()?.event("glide_started")
         dismissClipboardOffer()
         preparedSwipe = null
         dismissWordReplacement()
@@ -1139,22 +1237,49 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         preparedSwipe = PreparedSwipe(connection, target, LocalQwen.prepare(context))
     }
 
+    override fun onSwipeCancel() {
+        typingTrace()?.event("glide_touch_cancelled")
+    }
+
     override fun onSwipe(path: List<Pt>, keyCenters: Map<Char, Pt>, keyWidth: Float) {
         val preparation = preparedSwipe
         preparedSwipe = null
         endVoice()
-        if (!glideAllowed()) return
+        val trace = typingTrace()
+        val traceId = trace?.nextId()
+        trace?.event("glide_path") {
+            put("gestureId", traceId)
+            put("language", layoutLanguage())
+            put("path", JSONArray(path.map { JSONArray(listOf(it.x, it.y)) }))
+            put("keyCenters", JSONObject(keyCenters.mapKeys { it.key.toString() }.mapValues { JSONArray(listOf(it.value.x, it.value.y)) }))
+            put("keyWidth", keyWidth.toDouble())
+        }
+        if (!glideAllowed()) {
+            trace?.event("glide_discarded") { put("gestureId", traceId); put("reason", "glide_disabled") }
+            return
+        }
         val model = QwenModel.selectedState
-        if (!model.ready) { showModelNote(if (model.downloading) "Downloading model…" else "Download model"); return }
-        val decoder = decoder ?: return
-        val candidates = decoder.decodeScored(path, keyCenters, keyWidth, 24, includeFrequency = false)
+        if (!model.ready) {
+            trace?.event("glide_discarded") { put("gestureId", traceId); put("reason", "model_unavailable") }
+            showModelNote(if (model.downloading) "Downloading model…" else "Download model")
+            return
+        }
+        val candidates = decoder?.decodeScored(path, keyCenters, keyWidth, 24, includeFrequency = false).orEmpty()
+        trace?.event("glide_decoded") {
+            put("gestureId", traceId)
+            put("candidates", JSONArray(candidates.map {
+                JSONObject().put("word", it.word).put("cost", it.cost.takeIf(Float::isFinite))
+            }))
+            put("aheadInQueue", pendingSwipes.size)
+        }
         if (candidates.isEmpty()) return
+        val swipe = PendingSwipe(candidates, traceId)
         if (swipePending) {
-            pendingSwipes.addLast(candidates)
+            pendingSwipes.addLast(swipe)
             return
         }
         resetPredictionRequests()
-        pendingSwipes.addLast(candidates)
+        pendingSwipes.addLast(swipe)
         showModelNote("Reading swipe…")
         recognizeNextSwipe(preparation)
     }
@@ -1221,7 +1346,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         val connection = currentInputConnection ?: return false
         if (connection.getTextBeforeCursor(1, 0)?.toString() != "i") return false
         val target = editorTarget(connection, limit = 2, afterLimit = 1) ?: return false
-        return isStandalonePronoun(target) && commitCapitalizedPronoun(connection, target, separator)
+        return isStandalonePronoun(target) && commitCapitalizedPronoun(traceConnection(connection, "capitalize_i"), target, separator)
     }
 
     private fun commitCapitalizedPronoun(connection: InputConnection, target: EditorTarget, suffix: String): Boolean {
@@ -1313,7 +1438,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         currentWord = ""
         val best = options.firstOrNull()
         if (best == null) clearStrip()
-        else showStrip(listOf(options.getOrElse(1) { "" }, best, options.getOrElse(2) { "" }), 1)
+        else showStrip(listOf(options.getOrElse(1) { "" }, best, options.getOrElse(2) { "" }), 1, "replacement")
         replacement = target
     }
 
@@ -1321,15 +1446,16 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         localAllowed() && selEnd == target.cursor && currentInputConnection === target.connection &&
             editorTarget(target.connection, afterLimit = 64) == target.editor
 
-    private fun replaceWord(target: Replacement, word: String) {
+    private fun replaceWord(target: Replacement, word: String, traceId: Int?) {
         dismissWordReplacement()
         if (!replacementStillCurrent(target)) {
+            typingTrace()?.event("suggestion_discarded") { put("id", traceId); put("reason", "editor_changed") }
             updateSuggestions()
             return
         }
         suggestionSpace = null
         lastAutoCorrect = null
-        val connection = target.connection
+        val connection = traceConnection(target.connection, "replace_word", traceId)
         if (Build.VERSION.SDK_INT >= 34 && target.editor.cursor != null &&
             connection.replaceText(target.start, target.end, word, 1, null)) {
             learnReplacement(target, word)
@@ -1364,7 +1490,8 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     }
 
     private fun recognizeNextSwipe(preparation: PreparedSwipe? = null) {
-        val candidates = pendingSwipes.first()
+        val swipe = pendingSwipes.first()
+        val candidates = swipe.candidates
         val connection = currentInputConnection
         val target = connection?.let { glideTarget(it) }
         if (connection == null || target == null || !glideAllowed()) {
@@ -1383,6 +1510,14 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         val preparedTicket = preparation?.takeIf { it.connection === connection && it.target == target }?.ticket
         val round = localRound
         val casing = shift
+        val trace = typingTrace()
+        val started = if (trace != null) SystemClock.elapsedRealtime() else 0L
+        trace?.event("glide_ranking") {
+            put("gestureId", swipe.traceId)
+            put("context", context)
+            put("selectedText", target.selected)
+            put("prepared", preparedTicket != null)
+        }
         LocalQwen.rank(context, candidates.map { it.word }, preparedTicket) { result ->
             if (round != localRound) return@rank
             if (currentInputConnection !== connection || !glideAllowed() || glideTarget(connection) != target) {
@@ -1392,6 +1527,15 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
             }
             pendingSwipes.removeFirst()
             val ranked = result.getOrNull()?.let { GlideRanking.rank(candidates, it, personalWords()) }.orEmpty()
+            trace?.event("glide_ranked") {
+                put("gestureId", swipe.traceId)
+                put("elapsedMs", SystemClock.elapsedRealtime() - started)
+                put("modelScores", result.getOrNull()?.let { scores ->
+                    scoredWords(candidates.zip(scores.asList()) { candidate, score -> ScoredWord(candidate.word, score) })
+                })
+                put("ranked", JSONArray(ranked))
+                put("error", result.exceptionOrNull()?.javaClass?.simpleName)
+            }
             if (ranked.isEmpty()) {
                 if (swipePending) recognizeNextSwipe() else showModelNote("Model unavailable")
                 return@rank
@@ -1409,8 +1553,15 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
                 before.lastOrNull()?.let { it.isLetterOrDigit() || it in ".,!?:;" } == true) " " else ""
             suggestionSpace = null
             val insert = space + word
-            val committed = if (capitalizeBefore) commitCapitalizedPronoun(connection, target, insert)
-                else connection.commitText(insert, 1)
+            val observed = traceConnection(connection, "glide", swipe.traceId)
+            val committed = if (capitalizeBefore) commitCapitalizedPronoun(observed, target, insert)
+                else observed.commitText(insert, 1)
+            trace?.event("glide_result") {
+                put("gestureId", swipe.traceId)
+                put("word", word)
+                put("alternatives", JSONArray(alternatives.drop(1)))
+                put("acceptedByEditor", committed)
+            }
             if (!committed) {
                 cancelAiPredictions()
                 updateSuggestions()
@@ -1433,7 +1584,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
                 recognizeNextSwipe()
             } else if (suggestionsAllowed) {
                 val others = alternatives.drop(1)
-                showStrip(listOf(others.getOrElse(0) { "" }, word, others.getOrElse(1) { "" }), 1)
+                showStrip(listOf(others.getOrElse(0) { "" }, word, others.getOrElse(1) { "" }), 1, "glide")
             } else {
                 clearStrip()
             }
@@ -1447,7 +1598,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         suggestionSpace = null
         endVoice()
         if (swipePending) cancelAiPredictions()
-        val ic = currentInputConnection ?: return
+        val ic = traceConnection(currentInputConnection ?: return, "swipe_delete")
         if (bsOrigin < 0) {
             if (selStart < 0 || selStart != selEnd) return
             bsOrigin = selStart
@@ -1464,7 +1615,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     }
 
     override fun onBackspaceSwipeEnd(apply: Boolean) {
-        val ic = currentInputConnection
+        val ic = currentInputConnection?.let { traceConnection(it, "swipe_delete") }
         if (ic != null && bsOrigin >= 0) {
             if (apply) {
                 val target = learningTarget(ic)
@@ -1481,6 +1632,15 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     // ------------------------------------------------------------ toolbar
 
     override fun onSuggestion(index: Int) {
+        val trace = typingTrace()
+        val traceId = trace?.nextId()
+        trace?.event("suggestion_tapped") {
+            put("id", traceId)
+            put("source", trace.suggestionSource())
+            put("index", index)
+            put("word", slotWords.getOrNull(index))
+            put("replacing", replacement?.span?.word ?: lastSwipe?.word ?: currentWord)
+        }
         if (modelNote) { if (modelNoteAction) openApp(MainActivity.OPEN_AI_MODELS); return }
         endVoice()
         sprinkle?.let { sp ->
@@ -1489,12 +1649,13 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         }
         val word = slotWords.getOrNull(index)?.takeIf { it.isNotEmpty() } ?: return
         replacement?.let { target ->
-            replaceWord(target, word)
+            replaceWord(target, word, traceId)
             return
         }
-        val ic = currentInputConnection ?: return
+        val ic = traceConnection(currentInputConnection ?: return, "suggestion", traceId)
         if (stripBefore == null || selStart != selEnd || stripCursor != selEnd ||
             ic.getTextBeforeCursor(SentenceContext.READ_LIMIT, 0)?.toString() != stripBefore) {
+            trace?.event("suggestion_discarded") { put("id", traceId); put("reason", "editor_changed") }
             updateSuggestions()
             return
         }
@@ -1579,6 +1740,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         if (replacement != null) return
         if (sprinkle != null) return
         val word = slotWords.getOrNull(index)?.takeIf { it.isNotEmpty() } ?: return
+        typingTrace()?.event("suggestion_long_pressed") { put("index", index); put("word", word) }
         val norm = Dictionary.normalize(word)
         val inDict = dictionaries[settings.activeLanguage]?.contains(norm) == true
         if (userWords().isMine(norm)) {
@@ -1749,10 +1911,11 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     }
 
     private fun replaceText(ic: InputConnection, start: Int, length: Int, text: String) {
-        ic.beginBatchEdit()
-        ic.setSelection(start, start + length)
-        ic.commitText(text, 1)
-        ic.endBatchEdit()
+        val observed = traceConnection(ic, "emoji_sprinkle")
+        observed.beginBatchEdit()
+        observed.setSelection(start, start + length)
+        observed.commitText(text, 1)
+        observed.endBatchEdit()
     }
 
     private fun toast(text: String) = Toast.makeText(this, text, Toast.LENGTH_SHORT).show()
@@ -1765,6 +1928,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         typedSlot = -1
         emailChips = emptyList()
         root?.toolbar?.setSuggestions(slotWords, 1)
+        traceStrip("emoji_sprinkle", slotWords, 1)
     }
 
     /** ✨: the AI adds fitting emojis to your message (or the words you selected). */
@@ -1931,7 +2095,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         if (swipePending) cancelAiPredictions()
         r.showPanel(EmojiPanel(
             this,
-            onEmoji = { e -> lastSwipe = null; currentInputConnection?.commitText(e, 1) },
+            onEmoji = { e -> lastSwipe = null; commitPanelText(e, "emoji") },
             onBackspace = { handleBackspace() },
             onSpace = { handleSpace() },
             onClose = { r.closePanel() },
@@ -1948,7 +2112,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         emojiQuery = ""
         val bar = EmojiSearchBar(
             this,
-            onPick = { e -> currentInputConnection?.commitText(e, 1); addRecentEmoji(e) },
+            onPick = { e -> commitPanelText(e, "emoji_search"); addRecentEmoji(e) },
             onBack = { closeEmojiSearch(reopenPanel = true) },
         )
         emojiSearchBar = bar
@@ -1983,7 +2147,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
             KeyType.BACKSPACE -> emojiQuery = emojiQuery.dropLast(1)
             KeyType.ENTER -> {
                 EmojiSearch.search(emojiQuery).firstOrNull()?.let { e ->
-                    currentInputConnection?.commitText(e, 1); addRecentEmoji(e)
+                    commitPanelText(e, "emoji_search"); addRecentEmoji(e)
                 }
                 return true
             }
@@ -2000,7 +2164,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         captureClip()
         val panel = ClipboardPanel(
             this,
-            onPick = { text -> currentInputConnection?.commitText(text, 1) },
+            onPick = { text -> commitPanelText(text, "clipboard_history") },
             onDelete = { text -> clips.remove(text); Prefs.saveClips(clips); (r.panelView as? ClipboardPanel)?.setItems(clips) },
             onClear = { clips.clear(); Prefs.saveClips(clips); (r.panelView as? ClipboardPanel)?.setItems(clips) },
         )
@@ -2028,7 +2192,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     }
 
     private fun onEditAction(id: Int, pad: GridPadView) {
-        val ic = currentInputConnection ?: return
+        val ic = traceConnection(currentInputConnection ?: return, "edit_panel")
         when (id) {
             GridPadView.UP -> sendKey(KeyEvent.KEYCODE_DPAD_UP, selecting)
             GridPadView.DOWN -> sendKey(KeyEvent.KEYCODE_DPAD_DOWN, selecting)
@@ -2051,7 +2215,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     }
 
     private fun sendKey(code: Int, shiftHeld: Boolean, ctrl: Boolean = false) {
-        val ic = currentInputConnection ?: return
+        val ic = traceConnection(currentInputConnection ?: return, "edit_panel")
         var meta = 0
         if (shiftHeld) meta = meta or KeyEvent.META_SHIFT_ON or KeyEvent.META_SHIFT_LEFT_ON
         if (ctrl) meta = meta or KeyEvent.META_CTRL_ON or KeyEvent.META_CTRL_LEFT_ON
@@ -2072,6 +2236,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         val label = if (trimmed.length > CLIPBOARD_PREVIEW_LIMIT) "$preview…" else preview
         offeredClipTimestamp = timestamp
         root?.toolbar?.setClipboardSuggestion(label)
+        typingTrace()?.event("clipboard_suggestion_shown") { put("preview", label) }
         main.postDelayed(expireClipboardOffer, clipboardOfferTimeLeft(timestamp).coerceAtLeast(0L))
     }
 
@@ -2104,7 +2269,7 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
     override fun onClipboardSuggestion() {
         val timestamp = offeredClipTimestamp ?: return
         dismissClipboardOffer()
-        val ic = currentInputConnection ?: return
+        val ic = traceConnection(currentInputConnection ?: return, "clipboard_suggestion")
         val text = freshClipboardText(timestamp) ?: return
         if (!ic.commitText(text, 1)) return
         Prefs.pastedClipTimestamp = timestamp
@@ -2115,6 +2280,11 @@ class YboardIME : InputMethodService(), KeyboardView.Listener, ToolbarView.Liste
         cancelAiPredictions()
         updateAutoShift()
         updateSuggestions()
+    }
+
+    private fun commitPanelText(text: String, source: String) {
+        val connection = currentInputConnection ?: return
+        traceConnection(connection, source).commitText(text, 1)
     }
 
     private fun captureClip() {
